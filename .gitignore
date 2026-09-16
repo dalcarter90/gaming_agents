@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Trained brains are outputs, not source: regenerate them with
+#   python -m gaming_agents curriculum
+brains/
