@@ -1,6 +1,8 @@
 """Agent behaviour: search that is actually correct, and learning that learns."""
 
 
+import random
+
 import pytest
 
 from gaming_agents.registry import make_agent, make_game
@@ -188,3 +190,78 @@ def test_a_human_agent_falls_back_when_input_runs_out(rng):
     agent = make_agent("human", prompt=closed)
     state = game.initial_state(rng)
     assert agent.select_move(game, state, game.legal_moves(state), rng) in game.legal_moves(state)
+
+
+# -- solved-game reference agents -----------------------------------------
+
+def test_the_blackjack_solver_matches_its_own_theory(rng):
+    """The DP is computed analytically; this plays it out and checks they agree."""
+    from gaming_agents.games.blackjack import optimal_value
+
+    game = make_game("blackjack")
+    report = evaluate(game, make_agent("perfect-blackjack"), None, 40_000, rng)
+    assert report.mean_outcome == pytest.approx(optimal_value(), abs=0.015)
+
+
+def test_the_solver_beats_a_random_player_by_a_wide_margin(rng):
+    game = make_game("blackjack")
+    solved = evaluate(game, make_agent("perfect-blackjack"), None, 20_000, rng).mean_outcome
+    chance = evaluate(game, make_agent("random"), None, 20_000, rng).mean_outcome
+    assert solved > chance + 0.25
+
+
+def test_reference_agents_refuse_games_they_do_not_know(rng):
+    game = make_game("tictactoe")
+    state = game.initial_state(rng)
+    for spec in ("perfect-nim", "perfect-blackjack"):
+        with pytest.raises(ValueError):
+            make_agent(spec).select_move(game, state, game.legal_moves(state), rng)
+
+
+# -- learning-rate schedules ----------------------------------------------
+
+def test_a_visits_schedule_reaches_the_solved_optimum_where_a_fixed_step_does_not(rng):
+    """The point of alpha_mode: against a fixed environment, a constant step
+    size keeps bouncing around the answer however long it trains, and 1/n
+    converges to it."""
+    from gaming_agents.games.blackjack import optimal_value
+
+    game = make_game("blackjack")
+    fixed = make_agent("qlearner", epsilon=0.3, epsilon_decay=1.0, alpha=0.05, gamma=1.0)
+    scheduled = make_agent("qlearner", epsilon=0.3, epsilon_decay=1.0, alpha_mode="visits", gamma=1.0)
+    for agent in (fixed, scheduled):
+        train(game, agent, 150_000, rng, eval_episodes=10)
+
+    judge = lambda a: evaluate(game, a, None, 40_000, random.Random(11)).mean_outcome  # noqa: E731
+    assert judge(scheduled) > judge(fixed)
+    assert judge(scheduled) == pytest.approx(optimal_value(), abs=0.015)
+
+
+def test_a_visits_schedule_shrinks_the_step_as_it_learns(rng):
+    agent = make_agent("qlearner", alpha_mode="visits")
+    train(make_game("nim"), agent, 300, rng, eval_episodes=5)
+    counts = [n for table in agent.visits.values() for row in table.values() for n in row.values()]
+    assert counts and max(counts) > 1
+
+
+def test_a_constant_schedule_keeps_no_counts(rng):
+    """Counting every state-action pair on a big game would double memory."""
+    agent = make_agent("qlearner", alpha_mode="constant")
+    train(make_game("nim"), agent, 300, rng, eval_episodes=5)
+    assert not agent.visits
+
+
+def test_an_unknown_schedule_is_rejected():
+    with pytest.raises(ValueError, match="alpha_mode"):
+        make_agent("qlearner", alpha_mode="magic")
+
+
+def test_visit_counts_survive_a_save(tmp_path, rng):
+    """Reloading must not restart the 1/n schedule and undo what it settled on."""
+    from gaming_agents.training.persistence import load_agent, save_agent
+
+    agent = make_agent("qlearner", alpha_mode="visits")
+    train(make_game("nim"), agent, 500, rng, eval_episodes=5)
+    restored = load_agent(save_agent(agent, tmp_path / "brain.json"))
+    assert restored.alpha_mode == "visits"
+    assert restored.visits == agent.visits

@@ -229,3 +229,59 @@ def test_score_accumulates_across_moves(rng):
         total = state.score
     assert total > 0
     assert game.outcome(state) == (float(total),)
+
+
+# -- the solved Blackjack variant -----------------------------------------
+
+def test_the_solver_agrees_with_basic_strategy_where_it_is_obvious():
+    """Spot-checks against textbook basic strategy for a no-double, no-split game."""
+    from gaming_agents.games.blackjack import BlackjackState
+
+    game = Blackjack()
+
+    def play(total, up, ace=False):
+        return game.optimal_move(
+            BlackjackState(player_total=total, player_ace=ace, dealer_upcard=up,
+                           dealer_total=up, dealer_ace=up == 1)
+        )
+
+    assert play(20, 10) == STICK          # never break a good hand
+    assert play(17, 7) == STICK           # hard 17 always stands
+    assert play(11, 6) == HIT             # cannot bust, so always improve
+    assert play(8, 10) == HIT
+    assert play(16, 10) == HIT            # stiff hand, strong dealer: take the risk
+    assert play(13, 6) == STICK           # stiff hand, weak dealer: let them bust
+
+    # Hard 12 is the distinctive row of the chart, and the one a learner gets
+    # wrong longest: stand only against the upcards most likely to bust.
+    assert [play(12, up) for up in (2, 3)] == [HIT, HIT]
+    assert [play(12, up) for up in (4, 5, 6)] == [STICK, STICK, STICK]
+    assert [play(12, up) for up in (7, 8, 9, 10)] == [HIT] * 4
+
+    # Soft 18 stands through a dealer 8 and hits from 9 up.
+    assert [play(18, up, ace=True) for up in (2, 7, 8)] == [STICK] * 3
+    assert [play(18, up, ace=True) for up in (9, 10, 1)] == [HIT] * 3
+    assert play(17, 2, ace=True) == HIT   # soft 17 is never worth standing on
+
+
+def test_the_house_edge_is_where_theory_says_it_is():
+    from gaming_agents.games.blackjack import optimal_value
+
+    assert -0.06 < optimal_value() < -0.03
+
+
+def test_hitting_a_hand_that_cannot_bust_always_beats_sticking():
+    from gaming_agents.games.blackjack import hit_value, stick_value
+
+    for upcard in range(1, 11):
+        for total in (9, 10, 11):
+            assert hit_value(total, False, upcard) > stick_value(total, upcard)
+
+
+def test_the_dealer_distribution_is_a_distribution():
+    from gaming_agents.games.blackjack import _dealer_finals_from_upcard
+
+    for upcard in range(1, 11):
+        finals = dict(_dealer_finals_from_upcard(upcard))
+        assert sum(finals.values()) == pytest.approx(1.0)
+        assert all(f >= 17 for f in finals), "the dealer never stops below 17"

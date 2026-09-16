@@ -347,3 +347,125 @@ def test_the_ladder_runs_from_easiest_to_hardest():
 def test_unknown_curricula_are_rejected():
     with pytest.raises(ValueError):
         get_curriculum("nope")
+
+
+# -- benchmarks -----------------------------------------------------------
+
+def test_a_solo_stage_reports_its_reference_score(capsys, rng):
+    """Solo games have no opponent, so the benchmark is scored on its own and
+    turns the mastery bar into something a reader can interpret."""
+    ladder = NamedCurriculum(
+        name="bj",
+        description="One Blackjack rung with the solved optimum for reference.",
+        stages=(
+            Stage(
+                game="blackjack",
+                goal="beat random by a mile",
+                metric="mean_outcome",
+                mastery=-0.20,
+                episodes_per_round=5_000,
+                eval_episodes=2_000,
+                max_rounds=1,
+                benchmark="perfect-blackjack",
+                benchmark_episodes=2_000,
+                tune={"alpha_mode": "visits", "gamma": 1.0},
+            ),
+        ),
+    )
+    result = run_curriculum(ladder, make_agent("qlearner"), rng)
+    assert "for reference, perfect-blackjack scores" in capsys.readouterr().out
+    assert result.stages[0].benchmark is not None
+    assert result.stages[0].benchmark.mean_outcome > -0.10
+
+
+def test_benchmark_episodes_defaults_to_the_evaluation_budget(rng):
+    ladder = NamedCurriculum(
+        name="nim-bench",
+        description="One Nim rung.",
+        stages=(
+            Stage(
+                game="nim",
+                goal="beat random",
+                metric="win_rate",
+                mastery=0.5,
+                episodes_per_round=500,
+                eval_episodes=40,
+                max_rounds=1,
+                benchmark="perfect-nim",
+            ),
+        ),
+    )
+    result = run_curriculum(ladder, make_agent("qlearner"), rng, report=None)
+    assert result.stages[0].benchmark.episodes == 40
+
+
+def test_every_shipped_benchmark_can_actually_play_its_game(rng):
+    """A benchmark that raises would only blow up at the end of a long run."""
+    for name in ("classic", "solo", "full"):
+        for stage in get_curriculum(name).stages:
+            if not stage.benchmark:
+                continue
+            game = make_game(stage.game)
+            agent = make_agent(stage.benchmark, **stage.benchmark_kwargs)
+            state = game.initial_state(rng)
+            move = agent.select_move(game, state, game.legal_moves(state), rng)
+            assert move in game.legal_moves(state), f"{stage.benchmark} on {stage.game}"
+
+
+def test_one_stages_settings_do_not_leak_into_the_next(rng):
+    """The ladder mixes games wanting opposite learning rules -- Blackjack a
+    1/n step size, self-play a constant one -- so a stage must start from the
+    agent as it was built, not as the previous stage left it."""
+    agent = make_agent("qlearner")
+    built = (agent.alpha_mode, agent.gamma, agent.epsilon)
+
+    ladder = NamedCurriculum(
+        name="mixed",
+        description="Two rungs wanting different settings.",
+        stages=(
+            Stage(
+                game="blackjack", goal="a", metric="mean_outcome", mastery=99.0,
+                episodes_per_round=200, eval_episodes=50, max_rounds=1,
+                tune={"alpha_mode": "visits", "gamma": 1.0, "epsilon": 0.9},
+            ),
+            Stage(
+                game="nim", goal="b", metric="win_rate", mastery=99.0,
+                episodes_per_round=200, eval_episodes=50, max_rounds=1,
+                tune={"alpha": 0.3},
+            ),
+        ),
+    )
+    run_curriculum(ladder, agent, rng, gate=False, report=None)
+    assert (agent.alpha_mode, agent.gamma, agent.epsilon) == built
+    assert agent.alpha == 0.3, "the second stage's own setting should still apply"
+
+
+def test_every_shipped_stage_setting_names_a_real_knob():
+    """A typo in a tune dict would otherwise be silently ignored for agents
+    that legitimately have no such setting."""
+    agent = make_agent("qlearner")
+    for name in ("classic", "solo", "full"):
+        for stage in get_curriculum(name).stages:
+            for attr in stage.tune:
+                assert hasattr(agent, attr), f"{name}/{stage.game}: no such setting {attr!r}"
+
+
+def test_the_full_ladder_gives_each_game_the_learning_rule_it_needs(rng):
+    """Blackjack is stationary and wants 1/n; the self-play rungs are not and
+    want a constant step. In `full` they are interleaved, so this is exactly
+    the case the per-stage reset exists to protect."""
+    stages = {s.game: s for s in get_curriculum("full").stages}
+    assert stages["blackjack"].tune["alpha_mode"] == "visits"
+    for game in ("nim", "tictactoe", "connect4-mini", "connect4"):
+        assert stages[game].tune.get("alpha_mode", "constant") == "constant"
+
+    # And the reset actually delivers that, rather than the order deciding it.
+    agent = make_agent("qlearner")
+    seen = {}
+    for game in ("blackjack", "connect4"):
+        stage = stages[game]
+        for attr, value in stage.tune.items():
+            setattr(agent, attr, value)
+        seen[game] = agent.alpha_mode
+        agent = make_agent("qlearner")  # the reset the runner performs
+    assert seen == {"blackjack": "visits", "connect4": "constant"}

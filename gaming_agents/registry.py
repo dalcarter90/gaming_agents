@@ -11,7 +11,8 @@ from typing import Callable
 from .agents.base import Agent
 from .agents.human import HumanAgent
 from .agents.mcts import MCTSAgent
-from .agents.minimax import MinimaxAgent, PerfectNimAgent
+from .agents.minimax import MinimaxAgent
+from .agents.solvers import PerfectBlackjackAgent, PerfectNimAgent
 from .agents.random_agent import FirstMoveAgent, RandomAgent
 from .agents.tabular_q import TabularQAgent
 from .games.blackjack import Blackjack
@@ -37,6 +38,7 @@ AGENTS: dict[str, Callable[..., Agent]] = {
     "mcts": MCTSAgent,
     "minimax": MinimaxAgent,
     "perfect-nim": PerfectNimAgent,
+    "perfect-blackjack": PerfectBlackjackAgent,
     "human": HumanAgent,
 }
 
@@ -51,14 +53,43 @@ def make_game(name: str, /, **kwargs) -> Game:
     return factory(**kwargs)
 
 
-def make_agent(name: str, /, **kwargs) -> Agent:
-    """Build an agent by registry name. Positional-only for the same reason as
-    :func:`make_game` -- agents take a ``name=`` of their own."""
+#: Agents whose strength is a single number, so ``mcts:800`` can mean something.
+STRENGTH_KNOB = {"mcts": "simulations", "minimax": "depth"}
+
+
+def parse_spec(spec: str) -> tuple[str, dict[str, int]]:
+    """Split ``"mcts:800"`` into the agent name and how hard it should think.
+
+    A bare name is left alone. The number means simulations for MCTS and ply
+    depth for minimax -- the one knob that decides how strong each of them is.
+    """
+    name, _, strength = spec.partition(":")
+    if not strength:
+        return name, {}
+    knob = STRENGTH_KNOB.get(name)
+    if knob is None:
+        raise ValueError(f"{name!r} has no strength setting; drop the ':{strength}'")
+    try:
+        value = int(strength)
+    except ValueError:
+        raise ValueError(f"{strength!r} is not a number of {knob}") from None
+    if value < 1:
+        raise ValueError(f"{knob} must be at least 1")
+    return name, {knob: value}
+
+
+def make_agent(spec: str, /, **kwargs) -> Agent:
+    """Build an agent by registry name, or by a strength spec like ``mcts:800``.
+
+    ``spec`` is positional-only for the same reason as :func:`make_game`:
+    agents take a ``name=`` of their own.
+    """
+    name, tuning = parse_spec(spec)
     try:
         factory = AGENTS[name]
     except KeyError:
         raise ValueError(f"unknown agent {name!r}; try one of {sorted(AGENTS)}") from None
-    return factory(**kwargs)
+    return factory(**{**tuning, **kwargs})
 
 
 def describe_games() -> list[tuple[str, str, int, int]]:

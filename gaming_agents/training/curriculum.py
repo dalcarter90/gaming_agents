@@ -36,13 +36,20 @@ class Stage:
     episodes_per_round: int = 2_000
     eval_episodes: int = 200
     max_rounds: int = 5
-    benchmark_opponent: str | None = None
-    """Played against for reporting only -- never gates promotion. Use it to
-    watch progress against a much stronger opponent than the bar requires."""
+    benchmark: str | None = None
+    """A reference agent, reported but never used to gate promotion.
+
+    In a two-player game the learner is played against it. In a solo game it
+    is scored on its own, which turns an abstract bar into "here is what the
+    best possible play scores"."""
     game_kwargs: dict[str, Any] = field(default_factory=dict)
     train_opponent_kwargs: dict[str, Any] = field(default_factory=dict)
     eval_opponent_kwargs: dict[str, Any] = field(default_factory=dict)
-    benchmark_opponent_kwargs: dict[str, Any] = field(default_factory=dict)
+    benchmark_kwargs: dict[str, Any] = field(default_factory=dict)
+    benchmark_episodes: int = 0
+    """How many games to score the benchmark over. Defaults to
+    ``eval_episodes``; set it lower when the reference is an expensive
+    searcher and the number only has to be indicative."""
     tune: dict[str, Any] = field(default_factory=dict)
     """Agent attributes to set on entering this stage, e.g. a higher epsilon
     for a game whose state space the agent has never seen."""
@@ -77,13 +84,13 @@ class CurriculumResult:
         return sum(s.episodes for s in self.stages)
 
     def table(self) -> str:
-        lines = [f"{'stage':<14} {'rounds':>6} {'episodes':>9} {'score':>9} {'bar':>7}  result"]
-        lines.append("-" * 62)
+        lines = [f"{'stage':<14} {'rounds':>6} {'episodes':>9} {'score':>9} {'bar':>8}  result"]
+        lines.append("-" * 63)
         for result in self.stages:
             mark = "MASTERED" if result.passed else "not yet"
             lines.append(
                 f"{result.stage.game:<14} {result.rounds:>6} {result.episodes:>9,} "
-                f"{result.best:>9.3f} {result.stage.mastery:>7.2f}  {mark}"
+                f"{result.best:>9g} {result.stage.mastery:>8g}  {mark}"
             )
         return "\n".join(lines)
 
@@ -109,6 +116,14 @@ def run_curriculum(
     say: Reporter = report or (lambda _msg: None)
     result = CurriculumResult(curriculum=curriculum.name, agent=agent.name)
 
+    # Snapshot every setting any stage touches, so each stage starts from the
+    # agent as constructed. Without this a stage silently inherits the previous
+    # one's settings -- and since the ladder mixes games that want opposite
+    # ones (Blackjack needs a 1/n step size, self-play needs a constant one),
+    # that leak would hand a stage the wrong learning rule.
+    tunable = {attr for stage in curriculum.stages for attr in stage.tune}
+    defaults = {attr: getattr(agent, attr) for attr in tunable if hasattr(agent, attr)}
+
     for index, stage in enumerate(curriculum.stages, start=1):
         game = make_game(stage.game, **stage.game_kwargs)
         say(f"\n=== stage {index}/{len(curriculum.stages)}: {game.title} ===")
@@ -117,6 +132,8 @@ def run_curriculum(
         # Stage tuning is advisory: the knobs are named for the tabular learner,
         # and an agent that has no epsilon (MCTS, say) should walk the same
         # ladder rather than fall over on a setting that means nothing to it.
+        for attribute, value in defaults.items():
+            setattr(agent, attribute, value)
         skipped = [a for a in stage.tune if not hasattr(agent, a)]
         for attribute, value in stage.tune.items():
             if attribute not in skipped:
@@ -149,19 +166,30 @@ def run_curriculum(
             score = evaluation.metric(stage.metric)
             stage_result.best = max(stage_result.best, score)
 
+            # ``:g`` rather than a fixed width: the bars in this project range
+            # from -0.055 to 3000, and rounding either end to two decimals
+            # prints a number that is not the bar.
             say(
                 f"    round {round_number}: {stage_result.episodes:,} episodes  "
-                f"{stage.metric}={score:.3f} (bar {stage.mastery:.2f})  {evaluation.summary()}"
+                f"{stage.metric}={score:g} (bar {stage.mastery:g})  {evaluation.summary()}"
             )
 
             if score >= stage.mastery:
                 stage_result.passed = True
                 break
 
-        if stage.benchmark_opponent and game.num_players > 1:
-            reference = _build(stage.benchmark_opponent, stage.benchmark_opponent_kwargs)
-            stage_result.benchmark = evaluate(game, agent, reference, stage.eval_episodes, rng)
-            say(f"    benchmark vs {stage.benchmark_opponent}: {stage_result.benchmark.summary()}")
+        if stage.benchmark:
+            reference = _build(stage.benchmark, stage.benchmark_kwargs)
+            assert reference is not None
+            rounds_of = stage.benchmark_episodes or stage.eval_episodes
+            if game.num_players > 1:
+                stage_result.benchmark = evaluate(game, agent, reference, rounds_of, rng)
+                say(f"    benchmark vs {stage.benchmark}: {stage_result.benchmark.summary()}")
+            else:
+                # Nothing to play against, so score the reference itself: it is
+                # the ceiling the learner's number should be read against.
+                stage_result.benchmark = evaluate(game, reference, None, rounds_of, rng)
+                say(f"    for reference, {stage.benchmark} scores: {stage_result.benchmark.summary()}")
 
         result.stages.append(stage_result)
 
@@ -205,7 +233,7 @@ CLASSIC = NamedCurriculum(
             episodes_per_round=3_000,
             eval_episodes=300,
             max_rounds=4,
-            benchmark_opponent="perfect-nim",
+            benchmark="perfect-nim",
             tune={"epsilon": 0.30, "epsilon_decay": 0.9995, "alpha": 0.3, "gamma": 0.95},
         ),
         Stage(
@@ -217,7 +245,7 @@ CLASSIC = NamedCurriculum(
             episodes_per_round=20_000,
             eval_episodes=200,
             max_rounds=5,
-            benchmark_opponent="random",
+            benchmark="random",
             tune={"epsilon": 0.35, "epsilon_decay": 0.99995, "alpha": 0.2, "gamma": 0.95},
         ),
         Stage(
@@ -234,8 +262,7 @@ CLASSIC = NamedCurriculum(
             episodes_per_round=20_000,
             eval_episodes=300,
             max_rounds=5,
-            benchmark_opponent="mcts",
-            benchmark_opponent_kwargs={"simulations": 60},
+            benchmark="mcts:60",
             tune={"epsilon": 0.30, "epsilon_decay": 0.99995, "alpha": 0.15, "gamma": 0.95},
         ),
         Stage(
@@ -248,8 +275,7 @@ CLASSIC = NamedCurriculum(
             episodes_per_round=40_000,
             eval_episodes=400,
             max_rounds=5,
-            benchmark_opponent="mcts",
-            benchmark_opponent_kwargs={"simulations": 60},
+            benchmark="mcts:60",
             # A bigger board means almost every position is seen once, so the
             # learning rate has to be high enough for a single visit to teach
             # something. alpha=0.1 plateaus below the bar; 0.25 clears it.
@@ -264,15 +290,27 @@ SOLO = NamedCurriculum(
     stages=(
         Stage(
             game="blackjack",
-            goal="lose under a tenth of a bet per hand -- the house always wins a little",
+            # Perfect play still loses about 4.7 cents a hand here, so the bar
+            # is set just above that rather than anywhere near zero. Beating
+            # the house is not on the menu; playing the house correctly is.
+            goal="get within a cent a hand of the solved optimum of -0.047",
             metric="mean_outcome",
-            mastery=-0.10,
-            episodes_per_round=50_000,
-            eval_episodes=10_000,
+            mastery=-0.055,
+            episodes_per_round=100_000,
+            eval_episodes=20_000,
             max_rounds=3,
-            # Blackjack hands are short and every one ends in a real payoff, so
-            # there is nothing to discount: gamma stays at 1.
-            tune={"epsilon": 0.25, "epsilon_decay": 0.99999, "alpha": 0.05, "gamma": 1.0},
+            benchmark="perfect-blackjack",
+            # Two settings here are specific to a game of pure chance. gamma=1
+            # because a hand is short and ends in a real payoff, so there is
+            # nothing to discount. alpha_mode="visits" because the dealer never
+            # changes: a fixed step size keeps bouncing around the answer no
+            # matter how many hands it sees, while 1/n actually converges.
+            tune={
+                "epsilon": 0.30,
+                "epsilon_decay": 1.0,
+                "alpha_mode": "visits",
+                "gamma": 1.0,
+            },
         ),
         Stage(
             game="2048",
@@ -286,10 +324,15 @@ SOLO = NamedCurriculum(
             episodes_per_round=5_000,
             eval_episodes=20,
             max_rounds=3,
+            benchmark="mcts:20",
+            # A searching reference costs ~20 seconds a game here, and five
+            # games is plenty to show a tenfold gap.
+            benchmark_episodes=5,
             tune={"epsilon": 0.20, "epsilon_decay": 0.9995, "alpha": 0.1, "gamma": 0.95},
         ),
     ),
 )
+
 
 def _by_difficulty(*ladders: NamedCurriculum) -> tuple[Stage, ...]:
     """Merge ladders into one, ordered by how hard each game is.

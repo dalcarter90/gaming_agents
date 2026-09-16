@@ -20,36 +20,9 @@ DEFAULT_BRAIN = "brains/learner.json"
 
 # -- shared helpers -------------------------------------------------------
 
-#: Agents whose strength is one number, so ``mcts:800`` can mean something.
-STRENGTH_KNOB = {"mcts": "simulations", "minimax": "depth"}
-
-
-def parse_spec(spec: str) -> tuple[str, dict[str, int]]:
-    """Split ``"mcts:800"`` into the agent name and how hard it should think.
-
-    A bare name is left alone. The number means simulations for MCTS and ply
-    depth for minimax -- the one knob that decides how strong each of them is.
-    """
-    name, _, strength = spec.partition(":")
-    if not strength:
-        return name, {}
-    knob = STRENGTH_KNOB.get(name)
-    if knob is None:
-        raise ValueError(f"{name!r} has no strength setting; drop the ':{strength}'")
-    try:
-        value = int(strength)
-    except ValueError:
-        raise ValueError(f"{strength!r} is not a number of {knob}") from None
-    if value < 1:
-        raise ValueError(f"{knob} must be at least 1")
-    return name, {knob: value}
-
-
 def _agent_from(spec: str, brain: str | None, *, name: str | None = None, **kwargs) -> Agent:
     """Build an agent, optionally warm-started from a saved brain."""
-    kind, tuning = parse_spec(spec)
-    kwargs.update(tuning)
-    agent = make_agent(kind, name=name, **kwargs) if name else make_agent(kind, **kwargs)
+    agent = make_agent(spec, name=name, **kwargs) if name else make_agent(spec, **kwargs)
     if brain:
         path = Path(brain)
         if path.exists():

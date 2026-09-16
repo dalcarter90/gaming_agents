@@ -2,7 +2,8 @@
 
 import pytest
 
-from gaming_agents.cli import main, parse_spec
+from gaming_agents.cli import main
+from gaming_agents.registry import parse_spec
 
 
 def run(capsys, *argv) -> str:

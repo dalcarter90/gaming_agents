@@ -64,12 +64,14 @@ Three curricula ship: `classic` (the two-player rungs), `solo` (Blackjack then
 | `mcts` | no | Monte Carlo tree search (UCT). Needs no training, only the ability to simulate — so it scales where the table does not. |
 | `minimax` | no | Alpha-beta. Exhaustive on the small games, so it plays *perfectly* there. |
 | `perfect-nim` | no | The nim-sum rule. Exact and instant. |
+| `perfect-blackjack` | no | The variant solved by dynamic programming — the ceiling, not an opponent. |
 | `human` | — | You. |
 
 ## What actually happens
 
-Measured on this machine, seed 0. "vs random" is win rate; Blackjack and 2048
-are mean score per game.
+Measured on this machine. "vs random" is win rate; Blackjack and 2048 are mean
+score per game. Blackjack figures are over 200,000 hands (±0.004 at 95%), which
+matters — see note 3.
 
 | game | random | learned (`qlearner`) | search (`mcts`) |
 |---|---|---|---|
@@ -77,8 +79,8 @@ are mean score per game.
 | Nim vs perfect play | 0% | **50%** — which *is* optimal¹ | — |
 | Tic-Tac-Toe vs minimax (non-loss) | 15% | **98%** after 40k games | 82% |
 | Connect Four 6×7 vs random | 50% | **83%** after 80k games | 100% |
-| Blackjack (per hand) | −0.39 | **−0.057** after 50k hands | — |
-| 2048 (score) | 1,112 | 1,278 after 15k games² | **11,326** |
+| Blackjack (per hand) | −0.39 | **−0.045** after 200k hands³ | — |
+| 2048 (score) | 1,112 | 1,219 after 15k games² | **11,326** |
 
 ¹ The (1,3,5,7) opening is a *loss* for whoever moves first, and evaluation
 alternates seats. Winning exactly half is what perfect play looks like here;
@@ -91,10 +93,44 @@ learning runs out of road, and the curriculum says so instead of pretending
 otherwise:
 
 ```
-2048                3    15,000  1278.200 3000.00  not yet
+    round 3: 15,000 episodes  mean_outcome=1219 (bar 3000)  20 games, mean score 1,219.0
+    for reference, mcts:20 scores: 5 games, mean score 12,001.6
+    -> did not clear the bar for 2048 (best 1219)
 ```
 
-Search clears the same rung without training at all.
+Every stage can name a `benchmark` — a reference it reports but never gates on.
+For a two-player rung that is a stronger opponent; for a solo rung it is scored
+on its own, so the bar stops being an abstract number.
+
+³ Blackjack is solved exactly in `games/blackjack.py` (`perfect-blackjack` plays
+it), so this rung has a known ceiling: **−0.0466 per hand**. That is the house edge in a game with no
+doubling, splitting or naturals — perfect play still loses, and "success" here
+means getting close to −0.047, not close to zero. The learner reaches −0.045,
+which is the optimum to within sampling error, and its policy matches the
+solved strategy table.
+
+Getting there needed `alpha_mode="visits"`. With a constant step size the
+learner plateaus at −0.053 and **more training does not help** — 50k and 500k
+hands score the same, because a fixed step size never settles in a stochastic
+game. A 1/n schedule converges properly:
+
+| step size | 50k hands | 500k hands |
+|---|---|---|
+| constant `alpha=0.05` | −0.053 | −0.053 |
+| `alpha_mode="visits"` | −0.056 | **−0.045** |
+
+The stage now reports that ceiling next to the result, so the number is
+readable on its own:
+
+```
+    round 1: 100,000 episodes  mean_outcome=-0.037 (bar -0.055)  20000 games
+    for reference, perfect-blackjack scores: 20000 games, mean score -0.037
+    -> mastered Blackjack; promoting
+```
+
+That distinction is why `alpha_mode` exists rather than being hard-coded: a
+constant step is the *right* choice against a self-play opponent that keeps
+improving, and the wrong one against a dealer who never changes.
 
 ## How it fits together
 

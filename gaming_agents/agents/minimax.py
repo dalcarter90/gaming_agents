@@ -91,24 +91,3 @@ class MinimaxAgent(Agent):
 
     def stats(self) -> dict[str, int]:
         return {"depth": self.depth}
-
-
-class PerfectNimAgent(Agent):
-    """Plays Nim by the nim-sum rule. Unbeatable from a won position.
-
-    Worth having separately from :class:`MinimaxAgent` because it is instant
-    and exact, which makes it a clean reference when checking whether a
-    learner has really solved the first rung.
-    """
-
-    name = "perfect-nim"
-
-    def select_move(self, game: Game, state: State, legal_moves: Sequence[Move], rng: random.Random) -> Move:
-        optimal = getattr(game, "optimal_moves", None)
-        if optimal is None:
-            raise ValueError(f"{type(self).__name__} only plays Nim, not {game.name}")
-        winning = optimal(state)
-        if winning:
-            return rng.choice(winning)
-        # Already lost against correct play: take one object and hope.
-        return min(legal_moves, key=lambda m: m[1])

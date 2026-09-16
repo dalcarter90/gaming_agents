@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Hashable
 
 from ..core.game import Game, Rewards
@@ -119,6 +120,16 @@ class Blackjack(Game):
     def outcome(self, state: BlackjackState) -> Rewards:
         return (state.result,)
 
+    def optimal_move(self, state: BlackjackState) -> str:
+        """The exactly correct play in ``state``, solved rather than learned.
+
+        Ties go to sticking, which matters only for the handful of positions
+        where the two options are worth the same.
+        """
+        stick = stick_value(state.player_total, state.dealer_upcard)
+        hit = hit_value(state.player_total, state.player_ace, state.dealer_upcard)
+        return STICK if stick >= hit else HIT
+
     def render(self, state: BlackjackState) -> str:
         ace = " (usable ace)" if state.player_ace else ""
         dealer = state.dealer_total if state.done else f"{state.dealer_upcard} + ?"
@@ -159,3 +170,84 @@ def _finish(state: BlackjackState, total: int, ace: bool, result: float) -> Blac
         done=True,
         result=result,
     )
+
+
+# -- exact solution -------------------------------------------------------
+#
+# The deck is infinite and the dealer's rule is fixed, so this variant can be
+# solved outright rather than approximated. That gives the curriculum a real
+# ceiling to measure the learner against, the same way Nim's nim-sum does.
+
+#: Each rank with its probability. Faces all count ten, so a ten is four times
+#: as likely as any other draw.
+_DECK: tuple[tuple[int, float], ...] = tuple(
+    (card, (4 if card == 10 else 1) / 13) for card in range(1, 11)
+)
+
+
+@lru_cache(maxsize=None)
+def _dealer_finals(total: int, usable_ace: bool) -> tuple[tuple[int, float], ...]:
+    """Distribution of the dealer's final total, using 22 to mean 'bust'."""
+    if total >= DEALER_STICKS_AT:
+        return ((min(total, 22), 1.0),)
+    outcomes: dict[int, float] = {}
+    for card, p in _DECK:
+        nxt, ace = _add(total, usable_ace, card)
+        for final, q in _dealer_finals(nxt, ace):
+            outcomes[final] = outcomes.get(final, 0.0) + p * q
+    return tuple(sorted(outcomes.items()))
+
+
+@lru_cache(maxsize=None)
+def _dealer_finals_from_upcard(upcard: int) -> tuple[tuple[int, float], ...]:
+    """Same, but from the player's side of the table: the hole card is unknown."""
+    total, ace = _add(0, False, upcard)
+    outcomes: dict[int, float] = {}
+    for card, p in _DECK:
+        nxt, nxt_ace = _add(total, ace, card)
+        for final, q in _dealer_finals(nxt, nxt_ace):
+            outcomes[final] = outcomes.get(final, 0.0) + p * q
+    return tuple(sorted(outcomes.items()))
+
+
+@lru_cache(maxsize=None)
+def stick_value(player_total: int, dealer_upcard: int) -> float:
+    """Expected payoff from sticking on ``player_total``."""
+    value = 0.0
+    for final, p in _dealer_finals_from_upcard(dealer_upcard):
+        if final > 21 or player_total > final:
+            value += p
+        elif player_total < final:
+            value -= p
+    return value
+
+
+@lru_cache(maxsize=None)
+def hit_value(player_total: int, usable_ace: bool, dealer_upcard: int) -> float:
+    """Expected payoff from hitting, assuming optimal play from then on."""
+    value = 0.0
+    for card, p in _DECK:
+        total, ace = _add(player_total, usable_ace, card)
+        value += p * (-1.0 if total > 21 else _best_value(total, ace, dealer_upcard))
+    return value
+
+
+@lru_cache(maxsize=None)
+def _best_value(player_total: int, usable_ace: bool, dealer_upcard: int) -> float:
+    return max(
+        stick_value(player_total, dealer_upcard),
+        hit_value(player_total, usable_ace, dealer_upcard),
+    )
+
+
+@lru_cache(maxsize=None)
+def optimal_value() -> float:
+    """Expected payoff per hand under perfect play. Around -0.047 -- the house
+    edge that is left once the player has no doubling, splitting or naturals."""
+    value = 0.0
+    for first, p1 in _DECK:
+        for second, p2 in _DECK:
+            total, ace = _add(*_add(0, False, first), second)
+            for upcard, pu in _DECK:
+                value += p1 * p2 * pu * _best_value(total, ace, upcard)
+    return value
