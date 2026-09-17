@@ -41,6 +41,23 @@ class Agent(ABC):
     ) -> Move:
         """Choose one of ``legal_moves``."""
 
+    def action_probabilities(
+        self,
+        game: Game,
+        state: State,
+        legal_moves: Sequence[Move],
+    ) -> dict[str, float] | None:
+        """This agent's move distribution here, if it can state one exactly.
+
+        Most agents cannot: they return a move when asked and their strategy
+        has to be estimated by asking repeatedly. An agent that holds an
+        explicit mixed strategy should report it here instead, because
+        sampling would put a noise floor under any measurement of it -- and
+        for a poker agent the measurement that matters, exploitability, is
+        supposed to reach zero.
+        """
+        return None
+
     # -- learning hooks (no-ops by default) -------------------------------
 
     def start_episode(self, game: Game, seat: int) -> None:

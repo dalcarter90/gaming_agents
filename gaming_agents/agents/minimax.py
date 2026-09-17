@@ -1,5 +1,8 @@
 """Alpha-beta search: the yardstick the curriculum measures mastery against.
 
+Perfect-information games only. See :meth:`MinimaxAgent.select_move` for why
+this one refuses poker outright instead of playing it badly.
+
 On Nim and Tic-Tac-Toe the search is exhaustive, so this agent plays perfectly
 and "can the learner avoid losing to it" is a well-defined bar. On bigger
 boards it is depth-limited and leans on the game's heuristic, which makes it a
@@ -31,6 +34,13 @@ class MinimaxAgent(Agent):
     def select_move(self, game: Game, state: State, legal_moves: Sequence[Move], rng: random.Random) -> Move:
         if game.num_players != 2:
             raise ValueError(f"{type(self).__name__} only handles two-player games, not {game.name}")
+        if game.imperfect_information:
+            # Searching the true state would read the opponent's hand. There is
+            # no depth limit or heuristic that fixes that -- minimax assumes
+            # both sides see the same position, and in poker they do not.
+            raise ValueError(
+                f"{type(self).__name__} cannot play {game.name}: it would have to see hidden information"
+            )
         if len(legal_moves) == 1:
             return legal_moves[0]
 

@@ -12,6 +12,7 @@ from .core.episode import play_episode
 from .registry import AGENTS, describe_games, make_agent, make_game
 from .training.curriculum import CURRICULA, get_curriculum, run_curriculum
 from .training.evaluate import evaluate
+from .training.exploitability import exploitability
 from .training.persistence import load_agent, peek, save_agent
 from .training.trainer import tournament, train
 
@@ -87,6 +88,22 @@ def cmd_eval(args: argparse.Namespace) -> int:
     label = f"vs {right.name}" if right else "solo"
     print(f"{left.name} on {game.title} {label}: {report.summary()}")
     print(f"  mean outcome: {report.mean_outcome:,.3f}   mean turns: {report.mean_turns:.1f}")
+    return 0
+
+
+def cmd_exploit(args: argparse.Namespace) -> int:
+    rng = random.Random(args.seed)
+    game = make_game(args.game)
+    agent = _agent_from(args.agent, args.load)
+
+    if getattr(agent, "solve", None) and args.solve:
+        agent.solve(game, args.solve)
+        print(f"solved {args.solve:,} iterations before measuring")
+
+    report = exploitability(game, agent, rng, samples=args.samples)
+    print(f"{agent.name} on {game.title}: {report.summary()}")
+    print(f"  information sets examined: {report.info_sets}")
+    print("  0 would mean unexploitable; anything above it is what a best response takes per hand")
     return 0
 
 
@@ -244,6 +261,18 @@ def build_parser() -> argparse.ArgumentParser:
     arena.add_argument("--load", default=None)
     arena.add_argument("--agent-with-brain", default="qlearner", help="which entrant --load applies to")
     arena.set_defaults(func=cmd_tournament)
+
+    exploit = sub.add_parser(
+        "exploit", help="measure how much an agent leaks to an opponent who knows its strategy"
+    )
+    exploit.add_argument("--game", default="kuhn")
+    exploit.add_argument("--agent", default="cfr")
+    exploit.add_argument("--solve", type=int, default=20_000,
+                         help="tree passes to run first, for agents that solve rather than play")
+    exploit.add_argument("--samples", type=int, default=2_000,
+                         help="queries per information set for agents that cannot state their own mix")
+    exploit.add_argument("--load", default=None)
+    exploit.set_defaults(func=cmd_exploit)
 
     inspector = sub.add_parser("inspect", help="summarise a saved brain")
     inspector.add_argument("brain")

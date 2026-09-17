@@ -16,7 +16,12 @@ from typing import Any, Callable
 from ..agents.base import Agent
 from ..registry import make_agent, make_game
 from .evaluate import EvalReport, evaluate
+from .exploitability import exploitability
 from .trainer import TrainReport, train
+
+#: Metrics where a smaller number is a better one, so the bar is a ceiling
+#: rather than a floor. Poker is scored on how much a strategy leaks.
+LOWER_IS_BETTER = {"exploitability"}
 
 Reporter = Callable[[str], None]
 
@@ -32,6 +37,9 @@ class Stage:
     """Agent name to spar with. ``None`` means self-play."""
     eval_opponent: str = "random"
     metric: str = "win_rate"
+    """What decides promotion. The win-rate metrics come from the evaluation;
+    ``"exploitability"`` is computed separately by exact analysis of the game
+    tree, and is the only one where a lower score is a better one."""
     mastery: float = 0.9
     episodes_per_round: int = 2_000
     eval_episodes: int = 200
@@ -145,7 +153,8 @@ def run_curriculum(
         judge = _build(stage.eval_opponent, stage.eval_opponent_kwargs) if game.num_players > 1 else None
         budget = max(1, int(stage.episodes_per_round * scale))
 
-        stage_result = StageResult(stage=stage, rounds=0, episodes=0, passed=False, best=float("-inf"))
+        worst = float("inf") if stage.metric in LOWER_IS_BETTER else float("-inf")
+        stage_result = StageResult(stage=stage, rounds=0, episodes=0, passed=False, best=worst)
         for round_number in range(1, stage.max_rounds + 1):
             training: TrainReport = train(
                 game,
@@ -163,8 +172,17 @@ def run_curriculum(
             evaluation = training.final
             assert evaluation is not None  # train always evaluates at least once
             stage_result.history.append((stage_result.episodes, evaluation))
-            score = evaluation.metric(stage.metric)
-            stage_result.best = max(stage_result.best, score)
+            if stage.metric == "exploitability":
+                # Not something a match can measure: how much an opponent who
+                # knew this strategy could take off it, solved exactly.
+                score = exploitability(game, agent, rng).exploitability
+            else:
+                score = evaluation.metric(stage.metric)
+
+            lower_is_better = stage.metric in LOWER_IS_BETTER
+            stage_result.best = (
+                min(stage_result.best, score) if lower_is_better else max(stage_result.best, score)
+            )
 
             # ``:g`` rather than a fixed width: the bars in this project range
             # from -0.055 to 3000, and rounding either end to two decimals
@@ -174,7 +192,7 @@ def run_curriculum(
                 f"{stage.metric}={score:g} (bar {stage.mastery:g})  {evaluation.summary()}"
             )
 
-            if score >= stage.mastery:
+            if (score <= stage.mastery) if lower_is_better else (score >= stage.mastery):
                 stage_result.passed = True
                 break
 
@@ -346,13 +364,34 @@ def _by_difficulty(*ladders: NamedCurriculum) -> tuple[Stage, ...]:
     return tuple(sorted(stages, key=lambda s: _make_game(s.game).difficulty))
 
 
+POKER = NamedCurriculum(
+    name="poker",
+    description="Kuhn poker, scored on how exploitable the agent is rather than on whether it wins.",
+    stages=(
+        Stage(
+            game="kuhn",
+            # Beating a bad opponent proves nothing here -- a strategy that
+            # never bluffs and folds too often still beats random. The bar is
+            # how much a best response could take, which is zero at
+            # equilibrium and cannot be reached by getting lucky.
+            goal="leak under a hundredth of a chip a hand to an opponent who knows your strategy",
+            metric="exploitability",
+            mastery=0.01,
+            episodes_per_round=5_000,
+            eval_episodes=2_000,
+            max_rounds=4,
+            benchmark="nash-kuhn",
+        ),
+    ),
+)
+
 FULL = NamedCurriculum(
     name="full",
     description="Every game, interleaved into one ladder from easiest to hardest.",
-    stages=_by_difficulty(CLASSIC, SOLO),
+    stages=_by_difficulty(CLASSIC, SOLO, POKER),
 )
 
-CURRICULA: dict[str, NamedCurriculum] = {c.name: c for c in (CLASSIC, SOLO, FULL)}
+CURRICULA: dict[str, NamedCurriculum] = {c.name: c for c in (CLASSIC, SOLO, POKER, FULL)}
 
 
 def get_curriculum(name: str) -> NamedCurriculum:

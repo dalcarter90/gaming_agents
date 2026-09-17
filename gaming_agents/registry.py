@@ -9,14 +9,16 @@ from __future__ import annotations
 from typing import Callable
 
 from .agents.base import Agent
+from .agents.cfr import CFRAgent
 from .agents.human import HumanAgent
 from .agents.mcts import MCTSAgent
 from .agents.minimax import MinimaxAgent
-from .agents.solvers import PerfectBlackjackAgent, PerfectNimAgent
+from .agents.solvers import NashKuhnAgent, PerfectBlackjackAgent, PerfectNimAgent
 from .agents.random_agent import FirstMoveAgent, RandomAgent
 from .agents.tabular_q import TabularQAgent
 from .games.blackjack import Blackjack
 from .games.connect_four import ConnectFour, ConnectFourMini
+from .games.kuhn_poker import KuhnPoker
 from .games.nim import Nim
 from .games.tictactoe import TicTacToe
 from .games.twenty_forty_eight import TwentyFortyEight
@@ -28,6 +30,7 @@ GAMES: dict[str, Callable[[], Game]] = {
     "connect4-mini": ConnectFourMini,
     "connect4": ConnectFour,
     "blackjack": Blackjack,
+    "kuhn": KuhnPoker,
     "2048": TwentyFortyEight,
 }
 
@@ -35,10 +38,12 @@ AGENTS: dict[str, Callable[..., Agent]] = {
     "random": RandomAgent,
     "first": FirstMoveAgent,
     "qlearner": TabularQAgent,
+    "cfr": CFRAgent,
     "mcts": MCTSAgent,
     "minimax": MinimaxAgent,
     "perfect-nim": PerfectNimAgent,
     "perfect-blackjack": PerfectBlackjackAgent,
+    "nash-kuhn": NashKuhnAgent,
     "human": HumanAgent,
 }
 

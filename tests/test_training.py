@@ -327,15 +327,72 @@ def test_stage_settings_that_mean_nothing_to_an_agent_are_skipped(rng):
 
 
 def test_the_shipped_curricula_are_well_formed():
-    for name in ("classic", "solo", "full"):
+    for name in ("classic", "solo", "poker", "full"):
         ladder = get_curriculum(name)
         assert ladder.stages
         for stage in ladder.stages:
             game = make_game(stage.game)
             assert stage.goal
-            assert stage.metric in {"win_rate", "non_loss_rate", "mean_outcome"}
+            assert stage.metric in {"win_rate", "non_loss_rate", "mean_outcome", "exploitability"}
             if game.num_players == 1:
-                assert stage.metric == "mean_outcome", f"{stage.game}: solo games have no win rate"
+                assert stage.metric in {"mean_outcome"}, f"{stage.game}: solo games have no win rate"
+            if stage.metric == "exploitability":
+                # Gating on exploitability means solving the game tree, which
+                # only works for a game that can enumerate its openings.
+                assert game.initial_outcomes(), f"{stage.game}: cannot be analysed exactly"
+
+
+def test_a_hidden_information_game_is_never_gated_on_beating_someone():
+    """Win rate against a fixed opponent says almost nothing in poker, so a
+    rung with hidden information has to be scored on exploitability."""
+    for name in ("poker", "full"):
+        for stage in get_curriculum(name).stages:
+            if make_game(stage.game).imperfect_information:
+                assert stage.metric == "exploitability", (
+                    f"{stage.game}: a win rate here would certify a readable strategy"
+                )
+
+
+def test_a_lower_is_better_bar_is_a_ceiling_not_a_floor(rng):
+    """Every other metric passes by exceeding the bar; exploitability passes by
+    staying under it, and the runner has to know the difference."""
+    ladder = NamedCurriculum(
+        name="leaky",
+        description="A bar no untrained agent can get under.",
+        stages=(
+            Stage(
+                game="kuhn", goal="be unexploitable", metric="exploitability",
+                mastery=0.001, episodes_per_round=5, eval_episodes=20, max_rounds=1,
+            ),
+        ),
+    )
+    assert not run_curriculum(ladder, make_agent("random"), rng, report=None).stages[0].passed
+
+    generous = NamedCurriculum(
+        name="loose",
+        description="A bar anything clears.",
+        stages=(
+            Stage(
+                game="kuhn", goal="leak less than a whole chip", metric="exploitability",
+                mastery=5.0, episodes_per_round=5, eval_episodes=20, max_rounds=1,
+            ),
+        ),
+    )
+    assert run_curriculum(generous, make_agent("random"), rng, report=None).stages[0].passed
+
+
+def test_cfr_clears_the_poker_rung_and_the_q_learner_does_not(rng):
+    """The point of the rung: it takes a different kind of agent, not more
+    episodes of the same one."""
+    stage = get_curriculum("poker").stages[0]
+    ladder = NamedCurriculum(name="p", description="", stages=(stage,))
+
+    solver = run_curriculum(ladder, make_agent("cfr"), rng, report=None)
+    assert solver.stages[0].passed
+    assert solver.stages[0].best < stage.mastery
+
+    learner = run_curriculum(ladder, make_agent("qlearner"), rng, report=None)
+    assert not learner.stages[0].passed
 
 
 def test_the_ladder_runs_from_easiest_to_hardest():

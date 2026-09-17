@@ -51,9 +51,10 @@ python -m gaming_agents play --game tictactoe --first  # play it yourself
 | 3 | **Blackjack** | 1 | The world itself is random. A bad outcome is no longer evidence of a bad decision. |
 | 4 | **Connect Four (6×7)** | 2 | The full board — the same idea, an order of magnitude more of it. |
 | 5 | **2048** | 1 | Long episodes, a huge state space, and reward spread thinly across ~120 moves. |
+| 6 | **Kuhn Poker** | 2 | Hidden information. The first rung where the *state* is not what a player gets to see, and where the best strategy is a mixture rather than a move. |
 
-Three curricula ship: `classic` (the two-player rungs), `solo` (Blackjack then
-2048), and `full` (all six, interleaved by difficulty).
+Four curricula ship: `classic` (the two-player rungs), `solo` (Blackjack then
+2048), `poker`, and `full` (all seven, interleaved by difficulty).
 
 ## The agents
 
@@ -62,9 +63,11 @@ Three curricula ship: `classic` (the two-player rungs), `solo` (Blackjack then
 | `random` | no | The floor. Every number below is relative to this. |
 | `qlearner` | **yes** | Tabular Q-learning. One table per game, so a single agent carries everything it learned up the ladder. |
 | `mcts` | no | Monte Carlo tree search (UCT). Needs no training, only the ability to simulate — so it scales where the table does not. |
-| `minimax` | no | Alpha-beta. Exhaustive on the small games, so it plays *perfectly* there. |
+| `minimax` | no | Alpha-beta. Exhaustive on the small games, so it plays *perfectly* there. Refuses poker rather than cheat at it. |
+| `cfr` | **yes** | Counterfactual regret minimisation. Learns by walking the game tree, and converges to an unexploitable mixed strategy. |
 | `perfect-nim` | no | The nim-sum rule. Exact and instant. |
 | `perfect-blackjack` | no | The variant solved by dynamic programming — the ceiling, not an opponent. |
+| `nash-kuhn` | no | Kuhn's 1950 equilibrium, in closed form. Unexploitable by construction. |
 | `human` | — | You. |
 
 ## What actually happens
@@ -81,6 +84,7 @@ matters — see note 3.
 | Connect Four 6×7 vs random | 50% | **83%** after 80k games | 100% |
 | Blackjack (per hand) | −0.39 | **−0.045** after 200k hands³ | — |
 | 2048 (score) | 1,112 | 1,219 after 15k games² | **11,326** |
+| Kuhn poker (exploitability) | 0.469 | 0.250 | 0.164 — and see below⁴ |
 
 ¹ The (1,3,5,7) opening is a *loss* for whoever moves first, and evaluation
 alternates seats. Winning exactly half is what perfect play looks like here;
@@ -132,14 +136,93 @@ That distinction is why `alpha_mode` exists rather than being hard-coded: a
 constant step is the *right* choice against a self-play opponent that keeps
 improving, and the wrong one against a dealer who never changes.
 
+⁴ Poker inverts the scoreboard. The full table is the next section, because
+one footnote cannot hold it.
+
+## Poker, where winning stops being the measure
+
+Every rung up to here could be scored by playing: win rate, or chips per hand.
+Kuhn poker breaks that, and the break is worth showing in full.
+
+| agent | vs random | vs the equilibrium | **exploitability** |
+|---|---|---|---|
+| `random` | −0.000 | −0.166 | 0.469 |
+| `qlearner` | +0.086 | −0.005 | 0.250 |
+| `mcts:200` | **+0.243** | −0.018 | 0.164 |
+| `cfr` | +0.151 | +0.003 | **0.002** |
+| `nash-kuhn` | +0.169 | −0.005 | **0.000** |
+
+Chips per hand, seats alternating. Exploitability is what a best response that
+knows your strategy takes off you per hand; zero means unexploitable, and it is
+computed exactly, not sampled.
+
+Read the first column and MCTS is the best poker player here — it beats a random
+opponent harder than the game-theoretic optimum does. Read the last column and
+it is losing 0.16 a hand to anyone who studies it. **The ranking by win rate is
+close to the reverse of the ranking by exploitability.**
+
+The middle column is the other trap: against the equilibrium, everyone from the
+Q-learner to CFR lands within ±0.02 of the game value. An unexploitable opponent
+does not punish you, it just declines to lose — so playing against one cannot
+tell a badly leaking strategy from a sound one.
+
+### Why Q-learning cannot get there
+
+Its whole method is to find the best action and prefer it more. Here is the
+strategy that produces after 300,000 hands of self-play, next to CFR's:
+
+```
+                 qlearner          cfr
+J, first to act   check 1.00        bet 0.22 / check 0.78
+K, first to act   check 1.00        bet 0.66 / check 0.34
+Q, facing a bet   fold  1.00        call 0.34 / fold 0.66
+```
+
+Every Q-learner line is 1.00. It never bluffs, and it folds a Queen to every
+bet — so an opponent can bet every hand and take the pot. That is not a
+training-budget problem. In a game whose equilibrium is mixed, any method that
+keeps sharpening toward one action per spot is building something readable, and
+anything readable is exploitable. Across rounds its exploitability bounces
+between 0.33 and 0.17 rather than falling: it is chasing a best response to its
+own last strategy, in a circle.
+
+CFR's numbers are not arbitrary either. Kuhn solved this game in 1950: the
+first player's equilibria form a family parameterised by α ∈ [0, ⅓], betting a
+Jack with probability α, a King with **3α**, and calling with a Queen at
+**α + ⅓**. CFR arrived at α = 0.22, 3α = 0.66, α + ⅓ = 0.56 — the family,
+rediscovered from regret alone.
+
+### What had to change to make any of this honest
+
+Poker is the first game here where a state holds something the player to move
+must not see, and the existing agents did not know that. Measured before the
+fix, minimax and MCTS each won about 0.25 chips a hand off a random opponent —
+by reading its card.
+
+- `Game.key` is now explicitly the *information set*: what the player to move
+  is entitled to know. Kuhn's returns that player's own card and the betting,
+  and nothing else.
+- `Game.redeal` hands a searcher a world consistent with what it actually
+  knows. MCTS now resamples the opponent's card every simulation instead of
+  descending from the truth.
+- `minimax` refuses imperfect-information games outright. There is no depth
+  limit that fixes seeing the opponent's hand.
+
+MCTS still cannot bluff after all that, and it is worth being clear about why:
+inside any single sampled world the search can see both hands, so it plans as
+though its own were public. It never finds a reason to represent a hand it does
+not have. That is a known ceiling of determinized search, not a tuning problem.
+
 ## How it fits together
 
 ```
 core/game.py        the Game interface — one abstraction for 1- and 2-player,
-                    deterministic and stochastic games
+                    deterministic and stochastic, perfect- and
+                    imperfect-information games
 core/episode.py     runs one episode and hands each seat its own transitions
 agents/             random, tabular Q-learning, MCTS, alpha-beta, human
 training/curriculum.py   the ladder, the mastery gates, the promotion logic
+training/exploitability.py  exact best-response analysis, for the poker rung
 ```
 
 The dependency arrow points one way: games know nothing about agents, agents
@@ -188,6 +271,7 @@ python -m gaming_agents curriculum --curriculum full --scale 0.5 --no-gate
 python -m gaming_agents watch --game connect4 --agent mcts --opponent minimax
 python -m gaming_agents tournament --game tictactoe --agents random mcts:400 minimax
 python -m gaming_agents play --game connect4 --agent mcts:800 --first
+python -m gaming_agents exploit --game kuhn --agent cfr --solve 50000
 python -m gaming_agents inspect brains/c4.json
 ```
 
@@ -218,3 +302,7 @@ the one it came from.
 - **An LLM agent.** `Agent` needs one method, and every game renders to text
   with legal moves listed. `agents/llm.py` would drop straight into the same
   ladder and tournaments.
+- **Bigger poker.** Leduc hold'em is the usual next step: two betting rounds and
+  a shared card. `Game.initial_outcomes` can carry its community card dealt but
+  hidden, so the exploitability machinery would work unchanged — but the
+  brute-force best response would not, and would need the real algorithm.

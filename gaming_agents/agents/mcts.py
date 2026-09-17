@@ -8,6 +8,14 @@ curriculum uses it as the sparring partner on the harder rungs.
 Simulations are *open-loop*: each one re-steps the game from the root, so the
 same code handles stochastic games like 2048 (where a child node's board is
 resampled every visit) and deterministic ones (where it never changes).
+
+In an imperfect-information game each simulation first draws a world the
+acting seat cannot distinguish from the real one, and searches that. Averaging
+over those worlds is a real technique -- determinized, or perfect-information
+Monte Carlo, search -- but it has a known ceiling: inside any one simulation
+the search can see the opponent's hand, so it plans as though its own hand were
+public. It therefore never finds a reason to bluff, and never fears being
+bluffed. It plays poker honestly, which is not the same as playing it well.
 """
 
 from __future__ import annotations
@@ -74,8 +82,14 @@ class MCTSAgent(Agent):
         if len(legal_moves) == 1:
             return legal_moves[0]
 
+        seat = game.current_player(state)
         root = _Node(game, state)
         for _ in range(self.simulations):
+            if game.imperfect_information:
+                # Search a world consistent with what this seat actually knows,
+                # resampled every simulation. Descending from the true state
+                # would let the search read the opponent's hand.
+                root.refresh(game, game.redeal(state, seat, rng))
             self._simulate(game, root, rng)
 
         # Pick the most-visited move, not the highest-valued one: visit counts
