@@ -61,7 +61,8 @@ Four curricula ship: `classic` (the two-player rungs), `solo` (Blackjack then
 | agent | learns? | what it is |
 |---|---|---|
 | `random` | no | The floor. Every number below is relative to this. |
-| `qlearner` | **yes** | Tabular Q-learning. One table per game, so a single agent carries everything it learned up the ladder. |
+| `qlearner` | **yes** | Tabular Q-learning. One number per exact position — it memorises. |
+| `linear` | **yes** | Learns weights over a *description* of a position, so one game teaches it about every position that resembles it. |
 | `mcts` | no | Monte Carlo tree search (UCT). Needs no training, only the ability to simulate — so it scales where the table does not. |
 | `minimax` | no | Alpha-beta. Exhaustive on the small games, so it plays *perfectly* there. Refuses poker rather than cheat at it. |
 | `cfr` | **yes** | Counterfactual regret minimisation. Learns by walking the game tree, and converges to an unexploitable mixed strategy. |
@@ -81,7 +82,7 @@ matters — see note 3.
 | Nim vs random | 50% | **100%** after 3k games | — |
 | Nim vs perfect play | 0% | **50%** — which *is* optimal¹ | — |
 | Tic-Tac-Toe vs minimax (non-loss) | 15% | **98%** after 40k games | 82% |
-| Connect Four 6×7 vs random | 50% | **83%** after 80k games | 100% |
+| Connect Four 6×7 vs random | 50% | 83% after 80k games — or **99% after 100**⁵ | 100% |
 | Blackjack (per hand) | −0.39 | **−0.045** after 200k hands³ | — |
 | 2048 (score) | 1,112 | 1,219 after 15k games² | **11,326** |
 | Kuhn poker (exploitability) | 0.469 | 0.250 | 0.164 — and see below⁴ |
@@ -105,6 +106,9 @@ otherwise:
 Every stage can name a `benchmark` — a reference it reports but never gates on.
 For a two-player rung that is a stronger opponent; for a solo rung it is scored
 on its own, so the bar stops being an abstract number.
+
+⁵ The difference between memorising positions and describing them. Its own
+section is below.
 
 ³ Blackjack is solved exactly in `games/blackjack.py` (`perfect-blackjack` plays
 it), so this rung has a known ceiling: **−0.0466 per hand**. That is the house edge in a game with no
@@ -138,6 +142,125 @@ improving, and the wrong one against a dealer who never changes.
 
 ⁴ Poker inverts the scoreboard. The full table is the next section, because
 one footnote cannot hold it.
+
+## Describing a position instead of memorising it
+
+The tabular learner keeps one number per exact board. Count how often it ever
+gets to reuse one:
+
+| | Tic-Tac-Toe | Connect Four |
+|---|---|---|
+| positions recorded in 40,000 games | 4,329 | 245,450 |
+| seen **exactly once** | 28% | **95%** |
+| median times revisited | 3 | **1** |
+
+On Connect Four, 95% of what it writes down it never reads again. The position
+never recurs, so the experience is spent the moment it is recorded. Separately,
+86% of its Tic-Tac-Toe table is the same position rotated or flipped — it
+learns the corner opening four times over.
+
+`Game.features` is the fix. `key` answers *which position is this*; `features`
+answers *what is this position like* — threats I have, threats they have, who
+holds the centre. `LinearAgent` learns a weight per feature, so every game
+adjusts its opinion of every position sharing any of them, including ones it
+will never see.
+
+### Does it work?
+
+Win rate against a random opponent on Connect Four, same games, same opponent:
+
+| agent | 100 | 500 | 2,500 | 10,000 | 40,000 |
+|---|---|---|---|---|---|
+| `qlearner` (memorises) | 0.51 | 0.51 | 0.49 | 0.55 | 0.69 |
+| `linear-onehot` (control) | 0.78 | 0.78 | 0.84 | 0.85 | 0.87 |
+| `linear` (describes) | **0.97** | **0.99** | **1.00** | 0.99 | 0.99 |
+
+Games needed to clear the curriculum's 80% mastery bar: **100** for the feature
+learner, 2,500 for the control, and tens of thousands for the table — the
+curriculum run took 80,000.
+
+The same gap shows across the whole ladder. Every rung, same mastery bars:
+
+```
+$ python -m gaming_agents curriculum --curriculum classic --agent linear
+
+stage          rounds  episodes     score      bar  result
+---------------------------------------------------------------
+nim                 1       150  0.993333      0.9  MASTERED
+tictactoe           1     1,000     0.965     0.95  MASTERED
+connect4-mini       1     1,000  0.796667     0.75  MASTERED
+connect4            1     2,000    0.9975      0.8  MASTERED
+
+total episodes played: 4,150
+```
+
+**4,150 games against the tabular learner's 183,000**, and every rung cleared
+on the first round rather than the third or fifth.
+
+And what it has to remember, after 40,000 games:
+
+```
+qlearner         245,855 positions
+linear-onehot    156,320 weights
+linear                10 weights
+```
+
+Ten numbers. You can read them, which a 245,000-row table does not allow:
+
+```
+bias            +0.790     my_building     +0.101
+their_centre    -0.687     win_available   +0.090
+my_centre       +0.240     my_near_wins    +0.049
+their_near_wins -0.190     their_building  -0.037
+progress        +0.127     must_block      +0.012
+```
+
+It worked out that the centre column decides Connect Four, which is the first
+thing anyone is taught about the game.
+
+### Two honest caveats
+
+**The lookahead is doing some of the work.** `LinearAgent` picks moves by
+playing each one out a single step and valuing the result, which the tabular
+agent never did. Untrained, with every weight at zero, that alone wins **77%**
+against random. So the jump from `qlearner` to `linear` is not all about
+features — which is exactly why `linear-onehot` is in the table. It has the
+same lookahead and the same information as `qlearner`, so the gap between the
+last two rows, 0.87 against 0.99 and 2,500 games against 100, is what
+*describing* a position buys on its own.
+
+**It is not a strong Connect Four player yet**, it is a fast learner. Against
+real opposition, after 20,000 games:
+
+| | vs random | vs `mcts:60` | vs `mcts:200` |
+|---|---|---|---|
+| `linear` (20,000 games) | 98% | **69%** | 27% |
+| `qlearner` (80,000 games) | 82% | 16% | — |
+
+Beating a searcher at 60 simulations while the table manages 16% is a real
+result, not an artefact of thrashing a random opponent. Losing 73–27 to the
+same searcher at 200 simulations is equally real.
+
+What does *not* work is playing the two learners against each other, and the
+reason is worth keeping:
+
+```
+alternating seats            100W / 0D / 100L
+linear always moves first    200W / 0D /   0L
+qlearner always moves first  200W / 0D /   0L
+```
+
+Whoever moves first wins every single game, whichever agent it is. That is not
+one game replayed — 100 matches produced 88 distinct games — it is the
+first-move advantage in Connect Four being decisive between two players of
+roughly this standard. A head-to-head here measures the seating, not the skill,
+which is why both are scored against a common opponent instead.
+
+**The features are hand-written.** Someone who knows Connect Four chose
+"threats" and "centre control". That is the honest boundary of this step: the
+agent learned *how much* each of those matters, not *that they were the things
+to look at*. Learning the description itself is what a neural network does, and
+it is the next rung rather than this one.
 
 ## Poker, where winning stops being the measure
 
@@ -220,7 +343,8 @@ core/game.py        the Game interface — one abstraction for 1- and 2-player,
                     deterministic and stochastic, perfect- and
                     imperfect-information games
 core/episode.py     runs one episode and hands each seat its own transitions
-agents/             random, tabular Q-learning, MCTS, alpha-beta, human
+agents/             random, tabular Q-learning, linear function approximation,
+                    MCTS, alpha-beta, CFR, human
 training/curriculum.py   the ladder, the mastery gates, the promotion logic
 training/exploitability.py  exact best-response analysis, for the poker rung
 ```
@@ -294,9 +418,10 @@ the one it came from.
 
 ## Where to take it next
 
-- **Function approximation.** The tabular agent's wall on Connect Four and 2048
-  is exactly the wall that features or a neural net are for. `Game.key` is the
-  seam — swap it for a feature vector.
+- **Learned features.** `Game.features` closed the gap on Connect Four, but a
+  person wrote those features. A network that learns the description from the
+  board itself would remove the last hand-built piece — and would give 2048,
+  still stuck at 1,219, its first real shot.
 - **Learning from search.** MCTS is already the strongest thing here. Train the
   learner on its move choices and you have the outline of AlphaZero.
 - **An LLM agent.** `Agent` needs one method, and every game renders to text

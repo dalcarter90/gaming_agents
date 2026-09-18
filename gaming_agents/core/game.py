@@ -93,6 +93,25 @@ class Game(ABC):
         report their natural score.
         """
 
+    def features(self, state: State) -> dict[str, float]:
+        """Describe ``state`` from the point of view of the player to move.
+
+        This is the seam between memorising and understanding. :meth:`key`
+        answers "which position is this?", and a learner built on it can only
+        ever look a position up. ``features`` answers "what is this position
+        *like*?", and a learner built on it can carry what it learned in one
+        position across to every position that resembles it.
+
+        The default is a single indicator for this exact position, which makes
+        a linear learner over it precisely a lookup table -- so a game that
+        overrides nothing behaves exactly as it did before, and the difference
+        a real description makes can be measured against it.
+
+        Values should sit in roughly [-1, 1] so that one learning rate suits
+        every feature.
+        """
+        return {f"is:{self.key(state)!r}": 1.0}
+
     def redeal(self, state: State, seat: int, rng: random.Random) -> State:
         """A state ``seat`` cannot tell apart from this one, with the rest resampled.
 

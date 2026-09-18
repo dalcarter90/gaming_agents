@@ -1,6 +1,7 @@
 from .base import Agent, Transition
 from .cfr import CFRAgent
 from .human import HumanAgent
+from .linear_q import LinearAgent
 from .mcts import MCTSAgent
 from .minimax import MinimaxAgent
 from .random_agent import FirstMoveAgent, RandomAgent
@@ -12,6 +13,7 @@ __all__ = [
     "CFRAgent",
     "FirstMoveAgent",
     "HumanAgent",
+    "LinearAgent",
     "MCTSAgent",
     "MinimaxAgent",
     "NashKuhnAgent",

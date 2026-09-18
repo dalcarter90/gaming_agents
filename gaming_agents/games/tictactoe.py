@@ -74,6 +74,48 @@ class TicTacToe(Game):
             return (0.0, 0.0)
         return (1.0, -1.0) if state.winner == 0 else (-1.0, 1.0)
 
+    def features(self, state: TicTacToeState) -> dict[str, float]:
+        """The same idea as Connect Four's, on eight lines instead of hundreds.
+
+        Because a description counts lines rather than naming squares, it is
+        identical for a board and all seven of its rotations and reflections --
+        so the 86% of the lookup table that was duplicated corners and edges
+        simply stops existing.
+        """
+        me = state.player
+        mine, theirs = me + 1, 2 - me
+
+        one_away = {mine: 0, theirs: 0}
+        started = {mine: 0, theirs: 0}
+        for a, b, c in LINES:
+            line = (state.cells[a], state.cells[b], state.cells[c])
+            held_by_me, held_by_them = line.count(mine), line.count(theirs)
+            if held_by_me and held_by_them:
+                continue
+            owner, held = (mine, held_by_me) if held_by_me else (theirs, held_by_them)
+            if held == 2:
+                one_away[owner] += 1
+            elif held == 1:
+                started[owner] += 1
+
+        corners = (0, 2, 6, 8)
+        squeeze = lambda value, scale: min(1.0, value / scale)  # noqa: E731 - local shorthand
+
+        return {
+            "bias": 1.0,
+            "win_available": squeeze(one_away[mine], 1),
+            "must_block": squeeze(one_away[theirs], 1),
+            "my_threats": squeeze(one_away[mine], 2),
+            "their_threats": squeeze(one_away[theirs], 2),
+            "my_lines": squeeze(started[mine], 4),
+            "their_lines": squeeze(started[theirs], 4),
+            "my_centre": 1.0 if state.cells[4] == mine else 0.0,
+            "their_centre": 1.0 if state.cells[4] == theirs else 0.0,
+            "my_corners": squeeze(sum(state.cells[i] == mine for i in corners), 4),
+            "their_corners": squeeze(sum(state.cells[i] == theirs for i in corners), 4),
+            "progress": sum(1 for cell in state.cells if cell) / 9.0,
+        }
+
     def render(self, state: TicTacToeState) -> str:
         rows = []
         for r in range(3):

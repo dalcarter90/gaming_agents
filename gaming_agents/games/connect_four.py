@@ -39,6 +39,7 @@ class ConnectFour(Game):
         self.rows = rows
         self.cols = cols
         self.connect = connect
+        self._window_cells = self._build_windows()
         if name:
             self.name = name
             self.title = f"Connect Four {rows}x{cols}"
@@ -93,6 +94,103 @@ class ConnectFour(Game):
         if state.winner is None:
             return (0.0, 0.0)
         return (1.0, -1.0) if state.winner == 0 else (-1.0, 1.0)
+
+    def features(self, state: ConnectFourState) -> dict[str, float]:
+        """Describe the position the way a person would, not by its identity.
+
+        Nine numbers: how many lines each side is one move from completing, how
+        many they are two moves from, whether either can win right now, who
+        holds the centre, and how far into the game we are. Two boards that
+        share these are strategically the same board, which is the whole point
+        -- and it comes with a bonus, since a board and its mirror image
+        describe identically and so can no longer be learned twice.
+
+        One pass over the board does all of it. A near-win whose empty cell is
+        the next to fill in its column *is* an immediate threat, so the winning
+        and blocking features fall out of the same scan rather than costing a
+        separate search.
+        """
+        me = self.current_player(state)
+        mine, theirs = me + 1, 2 - me
+
+        board = self._flatten(state.columns)
+        heights = [len(column) for column in state.columns]
+
+        near = {mine: 0, theirs: 0}
+        now = {mine: 0, theirs: 0}
+        building = {mine: 0, theirs: 0}
+        almost = self.connect - 1
+
+        for window in self._window_cells:
+            held_me = held_them = 0
+            gap = -1
+            for cell in window:
+                mark = board[cell]
+                if mark == mine:
+                    held_me += 1
+                elif mark == theirs:
+                    held_them += 1
+                else:
+                    gap = cell
+            if held_me and held_them:
+                continue  # contested, so worth nothing to either side
+            if held_me:
+                owner, held = mine, held_me
+            elif held_them:
+                owner, held = theirs, held_them
+            else:
+                continue
+            if held == almost:
+                near[owner] += 1
+                # The one empty cell is reachable only if its column has
+                # filled to exactly that row -- otherwise the line is a
+                # promise, not a threat.
+                if heights[gap // self.rows] == gap % self.rows:
+                    now[owner] += 1
+            elif held == almost - 1:
+                building[owner] += 1
+
+        centre = state.columns[self.cols // 2]
+        cap = lambda value, scale: value / scale if value < scale else 1.0  # noqa: E731 - local shorthand
+
+        return {
+            "bias": 1.0,
+            "win_available": cap(now[mine], 1),
+            "must_block": cap(now[theirs], 1),
+            "my_near_wins": cap(near[mine], 3),
+            "their_near_wins": cap(near[theirs], 3),
+            "my_building": cap(building[mine], 6),
+            "their_building": cap(building[theirs], 6),
+            "my_centre": cap(centre.count(mine), self.rows),
+            "their_centre": cap(centre.count(theirs), self.rows),
+            "progress": state.filled / (self.rows * self.cols),
+        }
+
+    def _flatten(self, columns) -> list[int]:
+        """The board as one flat list, indexed ``column * rows + row``."""
+        board = [0] * (self.cols * self.rows)
+        for col, column in enumerate(columns):
+            base = col * self.rows
+            for row, mark in enumerate(column):
+                board[base + row] = mark
+        return board
+
+    def _build_windows(self) -> tuple[tuple[int, ...], ...]:
+        """Every run of ``connect`` cells that fits on the board, as flat indices.
+
+        Computed once per game rather than per position: the board's geometry
+        never changes, and this scan runs several times for every move played.
+        """
+        windows = []
+        for col in range(self.cols):
+            for row in range(self.rows):
+                for dc, dr in ((1, 0), (0, 1), (1, 1), (1, -1)):
+                    end_c, end_r = col + dc * (self.connect - 1), row + dr * (self.connect - 1)
+                    if 0 <= end_c < self.cols and 0 <= end_r < self.rows:
+                        windows.append(
+                            tuple((col + dc * i) * self.rows + (row + dr * i) for i in range(self.connect))
+                        )
+        return tuple(windows)
 
     def heuristic(self, state: ConnectFourState, seat: int) -> float:
         """Count how many ``connect``-length windows each side could still fill.
