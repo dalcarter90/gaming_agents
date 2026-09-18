@@ -38,8 +38,19 @@ class LinearAgent(Agent):
         epsilon: float = 0.2,
         epsilon_min: float = 0.01,
         epsilon_decay: float = 1.0,
+        shared: bool = False,
     ) -> None:
         super().__init__(name)
+        self.shared = shared
+        """Whether one set of opinions covers every game.
+
+        Off by default, which keeps each game's weights separate and matches
+        how the tabular agent behaves. Turn it on and anything the agent learns
+        about a concept in the shared vocabulary -- being one move from losing,
+        holding the centre -- applies the moment it meets that concept in
+        another game. Descriptions that name no shared concept are prefixed
+        with their game, so they stay local either way.
+        """
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
@@ -51,13 +62,20 @@ class LinearAgent(Agent):
         self.episodes = 0
         self.updates = 0
 
+    #: The bucket a game's weights live in. With sharing on every game uses the
+    #: same one, so concepts meet across games instead of being relearned.
+    SHARED = "*"
+
+    def _row(self, game: Game) -> dict[str, float]:
+        return self.weights[self.SHARED if self.shared else game.name]
+
     # -- the value function -----------------------------------------------
 
     def value(self, game: Game, state: State) -> float:
         """What this position is worth to the player about to move in it."""
         if game.is_terminal(state):
             return 0.0
-        row = self.weights[game.name]
+        row = self._row(game)
         return sum(row.get(feature, 0.0) * amount for feature, amount in game.features(state).items())
 
     def _score(self, game: Game, state: State, move: Move, seat: int, rng: random.Random) -> float:
@@ -109,7 +127,7 @@ class LinearAgent(Agent):
             target += self.gamma * self.value(game, transition.next_state)
 
         error = target - self.value(game, transition.state)
-        row = self.weights[game.name]
+        row = self._row(game)
         for feature, amount in game.features(transition.state).items():
             row[feature] += self.alpha * error * amount
         self.updates += 1
@@ -133,6 +151,7 @@ class LinearAgent(Agent):
                 "epsilon": self.epsilon,
                 "epsilon_min": self.epsilon_min,
                 "epsilon_decay": self.epsilon_decay,
+                "shared": self.shared,
             },
             "episodes": self.episodes,
             "updates": self.updates,

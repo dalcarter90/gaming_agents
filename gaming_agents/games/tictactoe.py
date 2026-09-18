@@ -77,6 +77,10 @@ class TicTacToe(Game):
     def features(self, state: TicTacToeState) -> dict[str, float]:
         """The same idea as Connect Four's, on eight lines instead of hundreds.
 
+        Deliberately the same *words* too. "One move from winning" means the
+        same thing on both boards, so naming it the same way is what lets an
+        agent carry an opinion about it from one game to the other.
+
         Because a description counts lines rather than naming squares, it is
         identical for a board and all seven of its rotations and reflections --
         so the 86% of the lookup table that was duplicated corners and edges
@@ -102,18 +106,22 @@ class TicTacToe(Game):
         squeeze = lambda value, scale: min(1.0, value / scale)  # noqa: E731 - local shorthand
 
         return {
+            # The shared vocabulary, named identically to Connect Four's, so
+            # that what is learned about "being one move from losing" in one
+            # game is the same quantity in the other.
             "bias": 1.0,
             "win_available": squeeze(one_away[mine], 1),
             "must_block": squeeze(one_away[theirs], 1),
-            "my_threats": squeeze(one_away[mine], 2),
-            "their_threats": squeeze(one_away[theirs], 2),
-            "my_lines": squeeze(started[mine], 4),
-            "their_lines": squeeze(started[theirs], 4),
+            "my_near_wins": squeeze(one_away[mine], 2),
+            "their_near_wins": squeeze(one_away[theirs], 2),
+            "my_building": squeeze(started[mine], 4),
+            "their_building": squeeze(started[theirs], 4),
             "my_centre": 1.0 if state.cells[4] == mine else 0.0,
             "their_centre": 1.0 if state.cells[4] == theirs else 0.0,
-            "my_corners": squeeze(sum(state.cells[i] == mine for i in corners), 4),
-            "their_corners": squeeze(sum(state.cells[i] == theirs for i in corners), 4),
             "progress": sum(1 for cell in state.cells if cell) / 9.0,
+            # Particular to this board, so prefixed and not shared.
+            "tictactoe:my_corners": squeeze(sum(state.cells[i] == mine for i in corners), 4),
+            "tictactoe:their_corners": squeeze(sum(state.cells[i] == theirs for i in corners), 4),
         }
 
     def render(self, state: TicTacToeState) -> str:

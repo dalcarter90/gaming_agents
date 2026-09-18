@@ -41,7 +41,7 @@ def test_the_default_description_is_the_lookup_table(rng):
     """Games that describe nothing must behave exactly as they always did."""
     game = make_game("nim")
     state = game.initial_state(rng)
-    assert game.features(state) == {f"is:{game.key(state)!r}": 1.0}
+    assert game.features(state) == {f"{game.name}:is:{game.key(state)!r}": 1.0}
 
 
 def test_two_different_positions_get_two_different_default_keys(rng):
@@ -256,3 +256,92 @@ def test_it_takes_a_win_and_blocks_a_loss(rng):
 
     blocking = ConnectFourState(columns=((1, 1, 1), (2, 2), (), (), (), (), ()), player=1, filled=5)
     assert agent.select_move(game, blocking, game.legal_moves(blocking), rng) == 0, "block the loss"
+
+
+# -- a vocabulary shared between games ------------------------------------
+
+SHARED_VOCABULARY = {
+    "bias", "win_available", "must_block", "my_near_wins", "their_near_wins",
+    "my_building", "their_building", "my_centre", "their_centre", "progress",
+}
+
+
+def test_both_board_games_speak_the_same_language(rng):
+    """Transfer between games is only possible if the same idea has the same
+    name in both. This is the thing that makes it possible."""
+    for name in ("connect4", "tictactoe", "connect4-mini"):
+        game = make_game(name)
+        described = set(game.features(game.initial_state(rng)))
+        assert SHARED_VOCABULARY <= described, f"{name} is missing {SHARED_VOCABULARY - described}"
+
+
+def test_features_peculiar_to_one_game_are_kept_out_of_the_shared_pool(rng):
+    """Corners mean something in Tic-Tac-Toe and nothing in Connect Four, so
+    they must not collide with anything when weights are shared."""
+    game = make_game("tictactoe")
+    described = set(game.features(game.initial_state(rng)))
+    for name in described - SHARED_VOCABULARY:
+        assert name.startswith("tictactoe:"), f"{name} is neither shared nor marked as local"
+
+
+def test_games_with_no_description_stay_out_of_each_others_way(rng):
+    """Two games' lookup keys could read identically by coincidence; prefixing
+    keeps them apart once one set of weights covers everything."""
+    for name in ("nim", "blackjack", "kuhn"):
+        game = make_game(name)
+        assert all(f.startswith(f"{name}:") for f in game.features(game.initial_state(rng)))
+
+
+def test_sharing_is_off_unless_asked_for(rng):
+    agent = make_agent("linear")
+    assert agent.shared is False
+    train(make_game("nim"), agent, 200, rng, eval_episodes=5)
+    train(make_game("tictactoe"), agent, 200, rng, eval_episodes=5)
+    assert set(agent.weights) == {"nim", "tictactoe"}
+
+
+def test_sharing_puts_every_game_in_one_pool(rng):
+    agent = make_agent("linear", shared=True)
+    train(make_game("nim"), agent, 200, rng, eval_episodes=5)
+    train(make_game("tictactoe"), agent, 200, rng, eval_episodes=5)
+    assert set(agent.weights) == {agent.SHARED}
+
+
+def test_what_one_game_teaches_shows_up_in_another(rng):
+    """The point of the shared vocabulary: an opinion formed about being one
+    move from losing is the same opinion in the next game."""
+    agent = make_agent("linear", alpha=0.02, epsilon=0.2, shared=True)
+    train(make_game("connect4"), agent, 1_000, random.Random(0),
+          opponent=make_agent("random"), eval_episodes=5)
+
+    learned = agent.weights[agent.SHARED]
+    assert SHARED_VOCABULARY <= set(learned), "Connect Four should have taught the shared concepts"
+
+    # Those weights are what it brings to a game it has never played.
+    ttt = make_game("tictactoe")
+    fresh = make_agent("linear", shared=True)
+    state = ttt.initial_state(rng)
+    assert agent.value(ttt, state) != fresh.value(ttt, state)
+
+
+def test_prior_experience_helps_a_game_never_played(rng):
+    """It should be better than an untrained agent at tic-tac-toe on the
+    strength of Connect Four alone."""
+    ttt = make_game("tictactoe")
+    seasoned = make_agent("linear", alpha=0.02, epsilon=0.2, shared=True)
+    train(make_game("connect4"), seasoned, 2_000, random.Random(0),
+          opponent=make_agent("random"), eval_episodes=5)
+
+    blank = make_agent("linear", shared=True)
+    judge = lambda a: evaluate(ttt, a, make_agent("random"), 400, random.Random(77)).win_rate  # noqa: E731
+    assert judge(seasoned) > judge(blank) + 0.1
+
+
+def test_sharing_survives_a_round_trip(tmp_path, rng):
+    from gaming_agents.training.persistence import load_agent, save_agent
+
+    agent = make_agent("linear", shared=True, alpha=0.05)
+    train(make_game("tictactoe"), agent, 300, rng, eval_episodes=5)
+    restored = load_agent(save_agent(agent, tmp_path / "shared.json"))
+    assert restored.shared is True
+    assert dict(restored.weights[agent.SHARED]) == dict(agent.weights[agent.SHARED])

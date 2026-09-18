@@ -62,7 +62,7 @@ Four curricula ship: `classic` (the two-player rungs), `solo` (Blackjack then
 |---|---|---|
 | `random` | no | The floor. Every number below is relative to this. |
 | `qlearner` | **yes** | Tabular Q-learning. One number per exact position — it memorises. |
-| `linear` | **yes** | Learns weights over a *description* of a position, so one game teaches it about every position that resembles it. |
+| `linear` | **yes** | Learns weights over a *description* of a position, so one game teaches it about every position that resembles it — and with `shared=True`, one *game* teaches it about the next one. |
 | `mcts` | no | Monte Carlo tree search (UCT). Needs no training, only the ability to simulate — so it scales where the table does not. |
 | `minimax` | no | Alpha-beta. Exhaustive on the small games, so it plays *perfectly* there. Refuses poker rather than cheat at it. |
 | `cfr` | **yes** | Counterfactual regret minimisation. Learns by walking the game tree, and converges to an unexploitable mixed strategy. |
@@ -261,6 +261,65 @@ which is why both are scored against a common opponent instead.
 agent learned *how much* each of those matters, not *that they were the things
 to look at*. Learning the description itself is what a neural network does, and
 it is the next rung rather than this one.
+
+## Carrying what you learned into a game you have never played
+
+Each game described its positions in its own words, so nothing crossed between
+them: the tabular agent keeps a separate table per game, and a Connect Four
+position means nothing in Tic-Tac-Toe.
+
+Now the board games share a vocabulary. "One move from winning", "must block",
+"holding the centre", "how far along we are" are the *same named quantity* on
+both boards, and `LinearAgent(shared=True)` keeps one set of opinions covering
+every game instead of one per game. Descriptions peculiar to a board are
+prefixed (`tictactoe:my_corners`) so they stay local.
+
+The interesting column is the first one — how it plays a game it has never
+played, purely on what a different game taught it.
+
+**Connect Four for 3,000 games, then Tic-Tac-Toe:**
+
+| games of tic-tac-toe played | 0 | 25 | 100 | 500 | 2,000 |
+|---|---|---|---|---|---|
+| win rate vs random, from scratch | 0.667 | 0.523 | 0.843 | 0.945 | 0.936 |
+| win rate vs random, after Connect Four | **0.879** | **0.925** | 0.950 | 0.947 | 0.938 |
+| never-lose vs perfect, from scratch | 0.150 | 0.633 | 0.472 | 0.956 | 0.967 |
+| never-lose vs perfect, after Connect Four | **0.606** | 0.611 | **0.822** | 0.956 | 0.967 |
+
+**Tic-Tac-Toe for 3,000 games, then Connect Four:**
+
+| games of connect four played | 0 | 25 | 100 | 500 | 2,000 |
+|---|---|---|---|---|---|
+| win rate vs random, from scratch | 0.767 | 0.841 | 0.954 | 0.993 | 0.995 |
+| win rate vs random, after Tic-Tac-Toe | **0.999** | **1.000** | 1.000 | 1.000 | 1.000 |
+
+Three things worth taking from this.
+
+**It transfers, and by a lot.** Tic-Tac-Toe hands Connect Four a 99.9% win rate
+before a single game of it has been played. In the other direction Connect Four
+takes Tic-Tac-Toe from 0.150 to 0.606 against perfect play with no experience
+of the game at all. What crosses over is not tactics but a sense of what a
+position is worth: blocking matters, the centre matters, a line you are one
+move from completing matters.
+
+**It buys a head start, not a higher ceiling.** By 500 games the two curves
+meet exactly — 0.956 and 0.956, then 0.967 and 0.967. Prior experience matters
+most where experience is scarce, and stops mattering once the game has been
+played enough to teach everything itself.
+
+**The from-scratch learner gets *worse* before it gets better.** 0.667 down to
+0.523 at 25 games; 0.633 down to 0.472 at 100. Early on it has opinions built
+from almost nothing, and they are worse than having no opinions at all. The
+agent arriving with prior experience never dips.
+
+### What actually made this possible
+
+Not the complexity of the games. The tabular learner cannot transfer anything
+between them no matter how much it plays, because a position is only ever
+itself. What crosses the gap is having a way to describe a position that means
+the same thing in both games — and a person wrote that vocabulary. The honest
+reading is that transferable experience is a property of the representation,
+not a reward for playing harder games.
 
 ## Poker, where winning stops being the measure
 

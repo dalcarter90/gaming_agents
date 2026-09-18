@@ -110,7 +110,7 @@ class Game(ABC):
         Values should sit in roughly [-1, 1] so that one learning rate suits
         every feature.
         """
-        return {f"is:{self.key(state)!r}": 1.0}
+        return {f"{self.name}:is:{self.key(state)!r}": 1.0}
 
     def redeal(self, state: State, seat: int, rng: random.Random) -> State:
         """A state ``seat`` cannot tell apart from this one, with the rest resampled.
