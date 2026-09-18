@@ -268,11 +268,20 @@ Each game described its positions in its own words, so nothing crossed between
 them: the tabular agent keeps a separate table per game, and a Connect Four
 position means nothing in Tic-Tac-Toe.
 
-Now the board games share a vocabulary. "One move from winning", "must block",
-"holding the centre", "how far along we are" are the *same named quantity* on
-both boards, and `LinearAgent(shared=True)` keeps one set of opinions covering
-every game instead of one per game. Descriptions peculiar to a board are
-prefixed (`tictactoe:my_corners`) so they stay local.
+Now every game speaks a vocabulary defined once, on `Game.UNIVERSAL_FEATURES`:
+
+```
+bias            always 1; the baseline value of being in this game
+progress        how far through the episode, 0 at the start, 1 at the end
+my_strength     how good this position is for me, 0 hopeless to 1 winning
+their_strength  the same for the opponent, as far as it is visible to me
+win_available   1 when I can finish this right now
+must_block      1 when I lose shortly unless I do something about it
+```
+
+Narrower ideas are namespaced — `board:centre_mine` for things only board games
+have, `tictactoe:corners_mine` for things only one game has — so they cannot
+collide once `LinearAgent(shared=True)` pools every game's weights into one set.
 
 The interesting column is the first one — how it plays a game it has never
 played, purely on what a different game taught it.
@@ -311,6 +320,80 @@ played enough to teach everything itself.
 0.523 at 25 games; 0.633 down to 0.472 at 100. Early on it has opinions built
 from almost nothing, and they are worse than having no opinions at all. The
 agent arriving with prior experience never dips.
+
+### Does it cross between *kinds* of game?
+
+The board games transfer to each other. Blackjack and Kuhn poker were given
+descriptions in the same universal vocabulary, so the question could be put
+properly: does mastering the simple board games help an agent take up cards?
+
+There is a control in here worth noticing. "After Nim" is the same volume of
+prior play in a game described only by lookup key, so it shares no concepts at
+all — it separates *prior play helps* from *prior concepts help*.
+
+**Blackjack** (perfect play is −0.0466 a hand, random is −0.39):
+
+| hands of blackjack played | 0 | 100 | 1,000 | 10,000 |
+|---|---|---|---|---|
+| from scratch | −0.087 | −0.098 | −0.109 | −0.102 |
+| after Nim (no shared concepts) | −0.087 | −0.107 | −0.103 | −0.098 |
+| after board games | −0.086 | −0.081 | −0.107 | −0.098 |
+
+**Kuhn poker**, chips per hand against a random player:
+
+| hands of poker played | 0 | 100 | 1,000 | 10,000 |
+|---|---|---|---|---|
+| from scratch | 0.309 | 0.309 | 0.323 | 0.253 |
+| after Nim | 0.309 | 0.297 | 0.319 | 0.315 |
+| after board games | 0.281 | 0.304 | 0.316 | 0.278 |
+
+**Nothing transfers.** Every row sits inside every other row's noise, and the
+board-game prior is no better than the Nim control that shares no concepts
+whatsoever.
+
+That is the more interesting half of the transfer story. Board to board moved a
+Tic-Tac-Toe agent from 0.150 to 0.606 against perfect play with no experience
+of the game. Board to cards moves nothing, *with the vocabulary deliberately
+made to match*. Naming two things "my_strength" does not make them the same
+thing:
+
+- On a board, value rises roughly in step with how close you are to a line, so
+  a weight learned on one board reads correctly on another.
+- In Blackjack the right play is not monotonic in the dealer's strength at all —
+  hard 12 hits against a 2 or 3, stands against 4 through 6, hits again from 7
+  up. No single weight on `their_strength` can say that.
+- In poker the right answer is a *mixture*, not a function of hand strength.
+  No amount of position-value thinking ever produces a bluff.
+
+A shared vocabulary is necessary for transfer and nowhere near sufficient. What
+has to match is the shape of the relationship underneath the words.
+
+### A hole card nobody had looked under
+
+Putting a searching agent on Blackjack for the first time turned up a bug that
+had been sitting there since the game was written. `LinearAgent` values a move
+by stepping the game forward — and stepping Blackjack forward plays the dealer
+out from a hand that includes the **hole card**, which the player is not
+allowed to see. One sample is noisy; average enough of them and the average
+*is* a measurement of the concealed card:
+
+```
+averaging  1 sample  per move: -0.0906
+averaging  4 samples per move: -0.0175
+averaging 16 samples per move: +0.0102
+averaging 64 samples per move: +0.0270   <- better than perfect play
+```
+
+Nothing honest beats −0.0466. Blackjack is now marked
+`imperfect_information = True` and has a `redeal` that keeps the upcard and the
+player's hand and draws a fresh card underneath, so a searcher reasons about a
+table it could actually be sitting at. `MCTSAgent` already respected that flag,
+so it was quietly fixed by the same change. The regression test is the sharpest
+one available: **score better than the house edge and you are cheating.**
+
+The tabular learner was never affected — it only ever sees `key`, which
+excludes the hole card and has a test saying so. This is the same class of bug
+poker exposed, in a game nobody had thought of as hiding anything.
 
 ### What actually made this possible
 

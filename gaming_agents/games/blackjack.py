@@ -42,6 +42,11 @@ class Blackjack(Game):
     title = "Blackjack"
     num_players = 1
     deterministic = False
+    #: The hole card is dealt but not shown. Nothing had searched this game
+    #: before, so nothing had ever had the chance to peek at it -- but an agent
+    #: that steps the game forward to evaluate "stick" is playing the dealer
+    #: out from a hand it is not allowed to see.
+    imperfect_information = True
     difficulty = 3
 
     def initial_state(self, rng: random.Random) -> BlackjackState:
@@ -119,6 +124,58 @@ class Blackjack(Game):
 
     def outcome(self, state: BlackjackState) -> Rewards:
         return (state.result,)
+
+    def redeal(self, state: BlackjackState, seat: int, rng: random.Random) -> BlackjackState:
+        """Keep everything on show, deal the dealer a fresh hole card.
+
+        The upcard stays, the player's hand stays, and the card underneath is
+        drawn again -- so a searcher reasons about a table it could actually be
+        sitting at rather than the one it secretly knows it is.
+        """
+        total, ace = _add(0, False, state.dealer_upcard)
+        total, ace = _add(total, ace, _draw(rng))
+        return BlackjackState(
+            player_total=state.player_total,
+            player_ace=state.player_ace,
+            dealer_upcard=state.dealer_upcard,
+            dealer_total=total,
+            dealer_ace=ace,
+            done=state.done,
+            result=state.result,
+        )
+
+    def features(self, state: BlackjackState) -> dict[str, float]:
+        """The universal vocabulary, read onto a hand of cards.
+
+        Every entry is the definition in :attr:`Game.UNIVERSAL_FEATURES`
+        applied as literally as this game allows, and no more:
+
+        * *progress* -- how close the hand is to being over, which here is how
+          close the total is to the 21 that ends it.
+        * *my_strength* -- standing on 11 or less never wins and standing on 21
+          always does, so strength ramps between them.
+        * *their_strength* -- all that is visible of the dealer is the upcard,
+          and a higher one is a stronger dealer. That is an approximation: it
+          misses that a dealer showing 2 is less dangerous than one showing 6.
+        * *win_available* -- holding 21, which cannot be beaten.
+        * *must_block* -- standing on 11 or less loses for certain, so the hand
+          is lost unless the player acts.
+        """
+        total = state.player_total
+        upcard = 11 if state.dealer_upcard == 1 else state.dealer_upcard
+        ramp = lambda value, low, high: min(1.0, max(0.0, (value - low) / (high - low)))  # noqa: E731
+
+        return {
+            "bias": 1.0,
+            "progress": ramp(total, 4, 21),
+            "my_strength": ramp(total, 11, 21),
+            "their_strength": ramp(upcard, 2, 11),
+            "win_available": 1.0 if total == 21 else 0.0,
+            "must_block": 1.0 if total <= 11 else 0.0,
+            # Particular to this game: an ace counted as eleven can be demoted,
+            # so a hand holding one cannot bust on the next card.
+            "blackjack:usable_ace": 1.0 if state.player_ace else 0.0,
+        }
 
     def optimal_move(self, state: BlackjackState) -> str:
         """The exactly correct play in ``state``, solved rather than learned.

@@ -39,6 +39,7 @@ class LinearAgent(Agent):
         epsilon_min: float = 0.01,
         epsilon_decay: float = 1.0,
         shared: bool = False,
+        lookahead_samples: int = 8,
     ) -> None:
         super().__init__(name)
         self.shared = shared
@@ -50,6 +51,13 @@ class LinearAgent(Agent):
         holding the centre -- applies the moment it meets that concept in
         another game. Descriptions that name no shared concept are prefixed
         with their game, so they stay local either way.
+        """
+        self.lookahead_samples = lookahead_samples
+        """How many times to sample a move's outcome before valuing it.
+
+        A deterministic game always answers the same way, so it takes one look
+        however large this is. A game of chance answers differently every time,
+        and judging a move on a single roll is judging it on luck.
         """
         self.alpha = alpha
         self.gamma = gamma
@@ -84,15 +92,25 @@ class LinearAgent(Agent):
         This looks one move ahead using the rules, which is a real difference
         from the tabular agent -- see ``linear-onehot`` in the results for how
         much of the improvement is the lookahead and how much is the features.
+
+        Where the game hides something, each look starts from a world the seat
+        cannot tell apart from the real one. Stepping the true state forward
+        instead would quietly read the hidden part: sample it often enough and
+        the average *is* a measurement of what is supposed to be concealed.
         """
-        nxt, rewards = game.step(state, move, rng)
-        score = rewards[seat]
-        if game.is_terminal(nxt):
-            return score
-        ahead = self.value(game, nxt)
-        # ``value`` is always from the mover's point of view, so in a two-player
-        # game the opponent's gain is this seat's loss.
-        return score + self.gamma * (ahead if game.current_player(nxt) == seat else -ahead)
+        looks = 1 if game.deterministic else max(1, self.lookahead_samples)
+        total = 0.0
+        for _ in range(looks):
+            start = game.redeal(state, seat, rng) if game.imperfect_information else state
+            nxt, rewards = game.step(start, move, rng)
+            score = rewards[seat]
+            if not game.is_terminal(nxt):
+                ahead = self.value(game, nxt)
+                # ``value`` is always from the mover's point of view, so in a
+                # two-player game the opponent's gain is this seat's loss.
+                score += self.gamma * (ahead if game.current_player(nxt) == seat else -ahead)
+            total += score
+        return total / looks
 
     # -- acting -----------------------------------------------------------
 
@@ -152,6 +170,7 @@ class LinearAgent(Agent):
                 "epsilon_min": self.epsilon_min,
                 "epsilon_decay": self.epsilon_decay,
                 "shared": self.shared,
+                "lookahead_samples": self.lookahead_samples,
             },
             "episodes": self.episodes,
             "updates": self.updates,

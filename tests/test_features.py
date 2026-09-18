@@ -91,7 +91,7 @@ def test_a_line_that_cannot_be_reached_yet_is_not_a_threat():
         columns=((2, 1), (2, 1), (2, 1), (), (), (), ()), player=1, filled=6
     )
     described = game.features(stacked)
-    assert described["their_near_wins"] > 0, "the line is still worth noticing"
+    assert described["their_strength"] > 0, "the line is still worth noticing"
     assert described["must_block"] == 0.0, "but it is not playable this turn"
 
 
@@ -99,8 +99,8 @@ def test_a_contested_line_counts_for_nobody():
     game = ConnectFour()
     blocked = ConnectFourState(columns=((1,), (1,), (2,), (), (), (), ()), player=0, filled=3)
     described = game.features(blocked)
-    assert described["my_near_wins"] == 0.0
-    assert described["their_near_wins"] == 0.0
+    assert described["my_strength"] == 0.0
+    assert described["their_strength"] == 0.0
 
 
 def test_the_description_is_the_same_size_whatever_the_position(rng):
@@ -224,7 +224,7 @@ def test_what_it_learned_can_be_read_back(rng):
 
     weights = dict(agent.explain("connect4", top=20))
     assert len(weights) <= 10, "the whole point is that there are few enough to read"
-    assert "my_centre" in weights and "their_near_wins" in weights
+    assert "board:centre_mine" in weights and "their_strength" in weights
 
 
 def test_it_values_positions_in_the_right_order(rng):
@@ -260,34 +260,49 @@ def test_it_takes_a_win_and_blocks_a_loss(rng):
 
 # -- a vocabulary shared between games ------------------------------------
 
-SHARED_VOCABULARY = {
-    "bias", "win_available", "must_block", "my_near_wins", "their_near_wins",
-    "my_building", "their_building", "my_centre", "their_centre", "progress",
-}
+#: Every game speaks these. Their definitions live on ``Game.UNIVERSAL_FEATURES``.
+UNIVERSAL = {"bias", "progress", "my_strength", "their_strength", "win_available", "must_block"}
+#: Ideas only board games have, so shared between them but not with the cards.
+BOARD = {"board:building_mine", "board:building_theirs", "board:centre_mine", "board:centre_theirs"}
 
 
-def test_both_board_games_speak_the_same_language(rng):
-    """Transfer between games is only possible if the same idea has the same
-    name in both. This is the thing that makes it possible."""
-    for name in ("connect4", "tictactoe", "connect4-mini"):
+def test_every_game_speaks_the_universal_vocabulary(rng):
+    """Transfer is only possible if the same idea has the same name everywhere.
+    Card games included -- that is what makes the cross-family question
+    answerable at all."""
+    for name in ("connect4", "tictactoe", "connect4-mini", "blackjack", "kuhn"):
         game = make_game(name)
         described = set(game.features(game.initial_state(rng)))
-        assert SHARED_VOCABULARY <= described, f"{name} is missing {SHARED_VOCABULARY - described}"
+        assert UNIVERSAL <= described, f"{name} is missing {UNIVERSAL - described}"
 
 
-def test_features_peculiar_to_one_game_are_kept_out_of_the_shared_pool(rng):
-    """Corners mean something in Tic-Tac-Toe and nothing in Connect Four, so
-    they must not collide with anything when weights are shared."""
-    game = make_game("tictactoe")
-    described = set(game.features(game.initial_state(rng)))
-    for name in described - SHARED_VOCABULARY:
-        assert name.startswith("tictactoe:"), f"{name} is neither shared nor marked as local"
+def test_the_universal_vocabulary_is_the_one_the_interface_declares():
+    from gaming_agents.core.game import Game
+
+    assert set(Game.UNIVERSAL_FEATURES) == UNIVERSAL
+
+
+def test_board_games_share_a_vocabulary_the_card_games_do_not(rng):
+    for name in ("connect4", "tictactoe", "connect4-mini"):
+        assert BOARD <= set(make_game(name).features(make_game(name).initial_state(rng)))
+    for name in ("blackjack", "kuhn"):
+        described = set(make_game(name).features(make_game(name).initial_state(rng)))
+        assert not (BOARD & described), f"{name} should not claim board-only ideas"
+
+
+@pytest.mark.parametrize("game_name", ["tictactoe", "connect4", "blackjack", "kuhn"])
+def test_narrower_ideas_are_namespaced(game_name, rng):
+    """Corners mean something in Tic-Tac-Toe and nothing in Blackjack, so they
+    must not collide with anything when one set of weights covers every game."""
+    game = make_game(game_name)
+    for name in set(game.features(game.initial_state(rng))) - UNIVERSAL:
+        assert ":" in name, f"{name} is neither universal nor marked as narrower"
 
 
 def test_games_with_no_description_stay_out_of_each_others_way(rng):
     """Two games' lookup keys could read identically by coincidence; prefixing
     keeps them apart once one set of weights covers everything."""
-    for name in ("nim", "blackjack", "kuhn"):
+    for name in ("nim", "2048"):
         game = make_game(name)
         assert all(f.startswith(f"{name}:") for f in game.features(game.initial_state(rng)))
 
@@ -315,7 +330,7 @@ def test_what_one_game_teaches_shows_up_in_another(rng):
           opponent=make_agent("random"), eval_episodes=5)
 
     learned = agent.weights[agent.SHARED]
-    assert SHARED_VOCABULARY <= set(learned), "Connect Four should have taught the shared concepts"
+    assert UNIVERSAL <= set(learned), "Connect Four should have taught the universal concepts"
 
     # Those weights are what it brings to a game it has never played.
     ttt = make_game("tictactoe")

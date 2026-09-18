@@ -154,16 +154,20 @@ class ConnectFour(Game):
         cap = lambda value, scale: value / scale if value < scale else 1.0  # noqa: E731 - local shorthand
 
         return {
+            # The universal vocabulary. "Strength" here is how close each side
+            # is to completing a line, which is what a position being good
+            # means on this board.
             "bias": 1.0,
+            "progress": state.filled / (self.rows * self.cols),
+            "my_strength": cap(near[mine], 3),
+            "their_strength": cap(near[theirs], 3),
             "win_available": cap(now[mine], 1),
             "must_block": cap(now[theirs], 1),
-            "my_near_wins": cap(near[mine], 3),
-            "their_near_wins": cap(near[theirs], 3),
-            "my_building": cap(building[mine], 6),
-            "their_building": cap(building[theirs], 6),
-            "my_centre": cap(centre.count(mine), self.rows),
-            "their_centre": cap(centre.count(theirs), self.rows),
-            "progress": state.filled / (self.rows * self.cols),
+            # Ideas every board game has, but no card game does.
+            "board:building_mine": cap(building[mine], 6),
+            "board:building_theirs": cap(building[theirs], 6),
+            "board:centre_mine": cap(centre.count(mine), self.rows),
+            "board:centre_theirs": cap(centre.count(theirs), self.rows),
         }
 
     def _flatten(self, columns) -> list[int]:

@@ -93,6 +93,30 @@ class Game(ABC):
         report their natural score.
         """
 
+    #: The vocabulary every game is expected to speak, defined once here so
+    #: that a weight learned for one of these means the same thing in the next
+    #: game. Each is stated in words first and implemented per game as
+    #: faithfully as that game allows:
+    #:
+    #: ``bias``          always 1; the baseline value of being in this game
+    #: ``progress``      how far through the episode, 0 at the start, 1 at the end
+    #: ``my_strength``   how good this position is for me, 0 hopeless to 1 winning
+    #: ``their_strength``the same for the opponent, as far as it is visible to me
+    #: ``win_available`` 1 when I can finish this right now
+    #: ``must_block``    1 when I lose shortly unless I do something about it
+    #:
+    #: Narrower ideas are namespaced -- ``board:`` for things only board games
+    #: have, ``<game>:`` for things only one game has -- so they cannot collide
+    #: with anything when one set of weights covers every game.
+    UNIVERSAL_FEATURES = (
+        "bias",
+        "progress",
+        "my_strength",
+        "their_strength",
+        "win_available",
+        "must_block",
+    )
+
     def features(self, state: State) -> dict[str, float]:
         """Describe ``state`` from the point of view of the player to move.
 

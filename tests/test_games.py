@@ -285,3 +285,53 @@ def test_the_dealer_distribution_is_a_distribution():
         finals = dict(_dealer_finals_from_upcard(upcard))
         assert sum(finals.values()) == pytest.approx(1.0)
         assert all(f >= 17 for f in finals), "the dealer never stops below 17"
+
+
+# -- the dealer's hole card is hidden from searchers too -------------------
+
+def test_blackjack_is_marked_as_hiding_something():
+    """It was not, for a long time, because nothing had ever searched it. An
+    agent that steps the game forward to value "stick" plays the dealer out
+    from a hand it is not allowed to see."""
+    assert Blackjack().imperfect_information is True
+
+
+def test_redealing_keeps_the_upcard_and_changes_what_is_under_it(rng):
+    from gaming_agents.games.blackjack import BlackjackState
+
+    game = Blackjack()
+    state = BlackjackState(player_total=16, player_ace=False, dealer_upcard=7,
+                           dealer_total=17, dealer_ace=False)
+    totals = set()
+    for _ in range(80):
+        resampled = game.redeal(state, 0, rng)
+        assert resampled.dealer_upcard == 7, "the card on show does not change"
+        assert resampled.player_total == 16, "nor does the player's own hand"
+        assert resampled.dealer_total >= 7, "the upcard is still in the dealer's hand"
+        totals.add(resampled.dealer_total)
+    assert len(totals) > 3, "the hidden card should actually be redrawn"
+
+
+def test_redealing_leaves_the_visible_information_untouched(rng):
+    """Whatever a redeal changes, it must not change anything the player can
+    already see -- otherwise the searcher is reasoning about the wrong table."""
+    game = Blackjack()
+    state = game.initial_state(rng)
+    for _ in range(40):
+        assert game.key(game.redeal(state, 0, rng)) == game.key(state)
+
+
+def test_a_searching_agent_cannot_beat_the_house_edge(rng):
+    """The sharpest test available: perfect play loses 4.7 chips a hundred
+    hands. Anything scoring better than that is reading the hole card, however
+    good it looks."""
+    from gaming_agents.games.blackjack import optimal_value
+    from gaming_agents.registry import make_agent as _make_agent, make_game as _make_game
+    from gaming_agents.training.evaluate import evaluate as _evaluate
+    from gaming_agents.training.trainer import train as _train
+
+    game = _make_game("blackjack")
+    agent = _make_agent("linear", lookahead_samples=32, alpha=0.02, epsilon=0.2, gamma=1.0)
+    _train(game, agent, 5_000, rng, eval_episodes=5)
+    scored = _evaluate(game, agent, None, 20_000, random.Random(5)).mean_outcome
+    assert scored < optimal_value() + 0.01, f"{scored:+.4f} is better than perfect play allows"

@@ -342,12 +342,20 @@ def test_the_shipped_curricula_are_well_formed():
                 assert game.initial_outcomes(), f"{stage.game}: cannot be analysed exactly"
 
 
-def test_a_hidden_information_game_is_never_gated_on_beating_someone():
+def test_an_adversarial_hidden_information_game_is_never_gated_on_beating_someone():
     """Win rate against a fixed opponent says almost nothing in poker, so a
-    rung with hidden information has to be scored on exploitability."""
+    rung with an *opponent* who is hiding something has to be scored on
+    exploitability.
+
+    Solitaire games are exempt even when they hide a card: Blackjack conceals
+    the hole card, but the dealer follows a fixed rule and has no strategy to
+    read, so there is nothing to be exploited by and exploitability is not
+    defined for one player.
+    """
     for name in ("poker", "full"):
         for stage in get_curriculum(name).stages:
-            if make_game(stage.game).imperfect_information:
+            game = make_game(stage.game)
+            if game.imperfect_information and game.num_players > 1:
                 assert stage.metric == "exploitability", (
                     f"{stage.game}: a win rate here would certify a readable strategy"
                 )

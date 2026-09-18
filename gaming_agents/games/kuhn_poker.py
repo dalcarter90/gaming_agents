@@ -115,6 +115,37 @@ class KuhnPoker(Game):
         winner = 0 if state.cards[0] > state.cards[1] else 1
         return (stake, -stake) if winner == 0 else (-stake, stake)
 
+    def features(self, state: KuhnState) -> dict[str, float]:
+        """The universal vocabulary, read onto a poker hand.
+
+        As with Blackjack, each entry is the shared definition applied as
+        literally as the game allows:
+
+        * *progress* -- how far through the betting the hand has got.
+        * *my_strength* -- the rank of the card held, which is the whole of
+          this game's hand strength.
+        * *their_strength* -- the opponent's card is hidden, but holding a King
+          means they hold a Jack or a Queen. The average of whatever is left in
+          the deck is honest information and gives no look at their hand.
+        * *win_available* -- holding the King, which cannot lose a showdown.
+        * *must_block* -- facing a bet, where the pot goes to them unless the
+          player answers it.
+        """
+        seat = self.current_player(state)
+        mine = state.cards[seat]
+        others = [card for card in (JACK, QUEEN, KING) if card != mine]
+
+        return {
+            "bias": 1.0,
+            "progress": len(state.history) / 3.0,
+            "my_strength": mine / 2.0,
+            "their_strength": sum(others) / 2.0 / len(others),
+            "win_available": 1.0 if mine == KING else 0.0,
+            "must_block": 1.0 if state.history and state.history[-1] == BET else 0.0,
+            # Particular to this game: how much is already in the middle.
+            "kuhn:pot": self.pot(state) / 4.0,
+        }
+
     def redeal(self, state: KuhnState, seat: int, rng: random.Random) -> KuhnState:
         """Keep ``seat``'s card, deal the opponent a new one from the rest."""
         mine = state.cards[seat]
