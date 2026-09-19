@@ -472,6 +472,65 @@ The tabular learner was never affected — it only ever sees `key`, which
 excludes the hole card and has a test saying so. This is the same class of bug
 poker exposed, in a game nobody had thought of as hiding anything.
 
+### What if one agent played everything and kept all of it?
+
+Keeping everything sounds strictly better — more experience, nothing thrown
+away. Three ways to spend the same budget across five games, two seeds each:
+
+| | Tic-Tac-Toe | Connect 4 | Blackjack | Poker | 2048 |
+|---|---|---|---|---|---|
+| **specialist** (one agent per game) | **0.938** | **0.997** | **−0.114** | **0.257** | 8,318 |
+| sequential (one pool, games in turn) | 0.819 | 0.900 | −0.342 | 0.244 | 8,931 |
+| interleaved (one pool, games rotated) | 0.595 | 0.737 | −0.305 | 0.177 | 7,669 |
+
+**Pooling everything makes it worse at almost everything.** Blackjack falls
+from −0.114 to −0.342, which is very nearly the −0.39 of playing at random: all
+of it gone. Tic-Tac-Toe drops from 0.94 to 0.60.
+
+And interleaving — rotating the games so none is ever finished, which ought to
+protect against forgetting what came earlier — is the *worst* of the three. It
+does not preserve each game's lessons; it averages them into a compromise that
+serves none of them. Playing the games in turn is better precisely because it
+lets one game own the weights at a time.
+
+The exception is 2048, which is unharmed. That turns out to be the clue.
+
+### Why: the same word, opposite meanings
+
+The weight each game arrives at for the *same named concept*, trained
+separately:
+
+| | Tic-Tac-Toe | Connect 4 | Blackjack | 2048 |
+|---|---|---|---|---|
+| `my_strength` | +0.225 | +0.028 | **+0.852** | +0.012 |
+| `their_strength` | −0.231 | −0.166 | −0.352 | **+0.379** |
+| `must_block` | +0.071 | −0.028 | **+0.402** | **−0.287** |
+| `progress` | −0.248 | +0.190 | +0.306 | **+1.131** |
+
+Three of the four change sign between games, and the vocabulary is exactly
+where the conflict lives.
+
+`progress` means "the board is filling and a draw is coming" in Tic-Tac-Toe and
+"my biggest tile is growing" in 2048 — the same word, worth −0.25 in one game
+and +1.13 in the other. `must_block` is a warning worth heeding in Blackjack
+(+0.40) and, in 2048, a state the agent has learned to shrug at (−0.29).
+
+Put those in one place and they fight. 2048 wins, because its weights are
+several times larger than anyone else's, which is exactly why 2048 is the one
+game pooling does not damage. Blackjack loses hardest because its one strong
+opinion, `my_strength` at +0.852, is outvoted by three games that barely care.
+
+So the honest answer to "keep everything, no matter what" is that the agent
+already keeps everything *within* a game — nothing is discarded, and a weight
+only moves when something surprising happens. Keeping it across games is a
+different proposition, and it costs more than it pays unless the games agree
+about what their shared words mean. `shared=False` is the default for that
+reason, and this is the measurement behind the default.
+
+*(Two seeds, so treat the 2048 column as noise — its twelve evaluation games
+per condition span thousands of points. The board and card columns are large
+and consistent across both seeds.)*
+
 ### What actually made this possible
 
 Not the complexity of the games. The tabular learner cannot transfer anything
