@@ -547,6 +547,61 @@ mistakes — mistakes turn out to be entirely survivable. They were sparing it a
 competition for space it cannot win. The fix for that is not a gentler
 curriculum, it is more room.
 
+### The multi-sport childhood
+
+The previous section makes generalists look like a bad idea: one agent holding
+five games is worse at almost all of them. But that agent never *stopped* being
+a generalist. Children who play several sports do not keep playing all of them
+for ever — they branch, and funnel into one.
+
+So: a shared childhood, then a fork. Each branch specialises in one game. Both
+conditions get the same total number of training episodes, which means the
+multi-sport agent **practises its main game half as much**. That cost is the
+whole test.
+
+| main game | early specialist | multi-sport | |
+|---|---|---|---|
+| Tic-Tac-Toe | 0.940 | 0.938 | level |
+| Connect Four | 0.994 | 0.994 | level |
+| Blackjack | −0.114 | −0.113 | level |
+| Poker | 0.252 | **0.295** | **multi-sport** |
+| 2048 | 8,325 | **9,364** | **multi-sport** |
+
+**The multi-sport agent never loses.** On half the practice at its own game it
+draws level everywhere and wins outright on the two games with room to win in.
+Poker by 17%, 2048 by 12%, both on seeds that agree.
+
+The three level results are ceilings and floors rather than real ties: the
+board games are both at the top of what this agent can do, and Blackjack is at
+the bottom — the linear agent never learns that game at all, so both conditions
+sit on the lookahead floor. Where there was headroom, the varied childhood won;
+where there was none, it cost nothing.
+
+### Why the branch is the whole difference
+
+Set the two experiments side by side and they look contradictory. Pooling five
+games makes an agent worse at almost all of them; a pooled childhood makes it
+better. The difference is entirely in what happens next.
+
+The continuous-life run showed that damage from another game is cheap to undo —
+one stage of going back restored full specialist level from a position that was
+nearly random. What it did *not* show was any lasting benefit, because that
+agent never stopped being pulled in five directions.
+
+Branching resolves it. The childhood leaves the weights somewhere sensible
+rather than at zero: a rough sense of what a strong position is, what an
+immediate threat looks like, that being one move from losing is bad. The
+specialisation that follows is then free to move those weights wherever that
+one game needs them, and it gets there faster than it would have from nothing.
+The detour costs nothing because the interference washes out; the structure
+survives because it was roughly right to begin with.
+
+Jack of all trades and master of none is what you get if you never stop.
+Stop at the right time and the trades were free.
+
+*(Two seeds each. The 2048 column swings by thousands of points between seeds,
+so read the margin rather than the absolute figures.)*
+
 ### Why: the same word, opposite meanings
 
 The weight each game arrives at for the *same named concept*, trained
