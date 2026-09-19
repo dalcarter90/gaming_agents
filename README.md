@@ -84,18 +84,17 @@ matters — see note 3.
 | Tic-Tac-Toe vs minimax (non-loss) | 15% | **98%** after 40k games | 82% |
 | Connect Four 6×7 vs random | 50% | 83% after 80k games — or **99% after 100**⁵ | 100% |
 | Blackjack (per hand) | −0.39 | **−0.045** after 200k hands³ | — |
-| 2048 (score) | 1,112 | 1,219 after 15k games² | **11,326** |
+| 2048 (score) | 1,112 | 1,219 memorising² — **8,110 describing**⁶ | 11,326 |
 | Kuhn poker (exploitability) | 0.469 | 0.250 | 0.164 — and see below⁴ |
 
 ¹ The (1,3,5,7) opening is a *loss* for whoever moves first, and evaluation
 alternates seats. Winning exactly half is what perfect play looks like here;
 it is the reason the learner is judged against `random` on this rung.
 
-² Deliberate, and the most interesting number in the table. A table keyed on
-exact 4×4 boards will essentially never see the same board twice, so fifteen
-thousand games of experience buy almost nothing — 2048 is where tabular
-learning runs out of road, and the curriculum says so instead of pretending
-otherwise:
+² A table keyed on exact 4×4 boards will essentially never see the same board
+twice, so fifteen thousand games of experience buy almost nothing. 2048 is
+where tabular learning ran out of road, and the curriculum said so instead of
+pretending otherwise:
 
 ```
     round 3: 15,000 episodes  mean_outcome=1219 (bar 3000)  20 games, mean score 1,219.0
@@ -320,6 +319,84 @@ played enough to teach everything itself.
 0.523 at 25 games; 0.633 down to 0.472 at 100. Early on it has opinions built
 from almost nothing, and they are worse than having no opinions at all. The
 agent arriving with prior experience never dips.
+
+### The game where memorising cannot work at all
+
+Connect Four showed describing a position beating memorising it. 2048 is the
+case where memorising is not merely inefficient but impossible: a 4×4 board
+essentially never comes round twice, so a lookup table has nothing to look up.
+
+Same agent, same one-move lookahead, same 300 games. The only difference is
+whether the board is named or described.
+
+| | what it stores | mean score |
+|---|---|---|
+| random play | — | 1,112 |
+| untrained, lookahead only | nothing | 2,253 |
+| tabular learner, 15,000 games | 245,000 positions | 1,219 |
+| **linear, exact board** (control) | **50,754 weights** | **1,970** |
+| **linear, described** | **9 weights** | **8,110** |
+| MCTS at 20 simulations | nothing, but searches every move | 11,326 |
+
+Memorising did not merely fail here. At 1,970 it finished *below* the 2,253 an
+untrained agent scores on the lookahead alone — fifty thousand numbers of
+experience, and it would have done better having learned nothing. Nine numbers
+took the same agent to 8,110, and to the 1024 tile in ten games out of
+twenty-five.
+
+That is the strongest form of the project's central claim. The curriculum rung
+that nothing had ever cleared now clears on its first round, and the searching
+reference it is measured against is barely ahead:
+
+```
+$ python -m gaming_agents curriculum --curriculum solo --agent linear --scale 0.06
+
+=== stage 2/2: 2048 ===
+    round 1: 300 episodes  mean_outcome=9167.6 (bar 3000)
+    for reference, mcts:20 scores: 5 games, mean score 9,751.2
+    -> mastered 2048; promoting
+```
+
+Nine weights and 300 games land within 6% of a search that runs twenty
+simulations at every one of six hundred moves. Blackjack, in the same run,
+still misses its bar at −0.094 — the two solo rungs now fail and pass in
+opposite directions for the same reason.
+
+It also fills in the last corner of a grid the earlier rungs mapped out:
+
+| | small state space | huge state space |
+|---|---|---|
+| **deterministic** | Nim, Tic-Tac-Toe: both work | Connect Four: **describing wins**, 100 games against 80,000 |
+| **stochastic** | Blackjack: **memorising wins**, −0.052 against −0.10 | 2048: **describing wins**, 8,110 against 1,970 |
+
+Describing a position pays when there are too many positions to hold and the
+value moves roughly in step with the description. It costs when the positions
+are few enough to hold exactly and the right answer is not a straight line
+through them — Blackjack has 280 decision points and a policy that reverses
+direction twice across the dealer's upcard, and no set of weights can say that.
+
+### It did not learn the strategy a person would
+
+The nine weights are worth reading, with one caveat: a constant feature cannot
+change which move looks best, so the large `bias` term is an offset that plays
+no part in how it acts. What drives the play is the rest.
+
+```
+2048:mergeable  +1.367     must_block      -0.354
+2048:ordered    +0.525     progress        +0.273
+my_strength     -0.626     2048:cornered   -0.116
+```
+
+Textbook 2048 says: keep the board empty, and park your biggest tile in a
+corner. This agent learned close to the opposite — it puts its strongest weight
+on *having merges available* and a negative one on empty space, and it ignores
+corners entirely. It plays a packed board full of matching neighbours rather
+than a sparse one with an anchored king tile.
+
+It reaches 1024 that way. Two honest caveats: the features are correlated, so
+individual weights divide the credit between them somewhat arbitrarily, and the
+strategy it found is worse than the best known human one. But it is not a
+degenerate policy, and nobody told it to play that way.
 
 ### Does it cross between *kinds* of game?
 
@@ -560,10 +637,11 @@ the one it came from.
 
 ## Where to take it next
 
-- **Learned features.** `Game.features` closed the gap on Connect Four, but a
-  person wrote those features. A network that learns the description from the
-  board itself would remove the last hand-built piece — and would give 2048,
-  still stuck at 1,219, its first real shot.
+- **Learned features.** `Game.features` closed the gap on Connect Four and on
+  2048, but a person wrote those features every time, and the one game still
+  unaddressed — chess, or anything with a screen — would need a new set again.
+  A network that learns the description from the board itself is the only way
+  off that treadmill, and it is now the last hand-built piece left.
 - **Learning from search.** MCTS is already the strongest thing here. Train the
   learner on its move choices and you have the outline of AlphaZero.
 - **An LLM agent.** `Agent` needs one method, and every game renders to text

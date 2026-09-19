@@ -72,6 +72,81 @@ class TwentyFortyEight(Game):
     def outcome(self, state: Game2048State) -> Rewards:
         return (float(state.score),)
 
+    def features(self, state: Game2048State) -> dict[str, float]:
+        """The universal vocabulary, read onto a grid, plus what is spatial here.
+
+        2048 is the one game in this project where memorising cannot work at
+        all -- a 4x4 board essentially never comes round twice -- so it is the
+        cleanest test of whether describing a position is enough on its own.
+
+        The universal entries, applied as literally as this game allows:
+
+        * *progress* -- how far the largest tile has come toward the target.
+        * *my_strength* -- empty cells. Room to manoeuvre is the single best
+          thing about a 2048 position; a full board is a lost one.
+        * *their_strength* -- what is working against the player is clutter:
+          neighbouring tiles of different values that cannot be merged and so
+          sit in the way.
+        * *win_available* -- the target tile is made. Almost always zero, which
+          is honest: this game has no winning move to spot, only a long climb.
+        * *must_block* -- two empty cells or fewer, where one unlucky spawn
+          jams the board.
+
+        The rest is the spatial structure a person would talk about: whether
+        values run in order, and whether the biggest tile is anchored in a
+        corner instead of stranded in the middle.
+        """
+        size = self.size
+        cells = state.cells
+        empty = sum(1 for value in cells if value == 0)
+        largest = max(cells)
+
+        mergeable = clutter = 0
+        for row in range(size):
+            for col in range(size):
+                value = cells[row * size + col]
+                if not value:
+                    continue
+                for down, across in ((1, 0), (0, 1)):
+                    r, c = row + down, col + across
+                    if r >= size or c >= size:
+                        continue
+                    neighbour = cells[r * size + c]
+                    if not neighbour:
+                        continue
+                    if neighbour == value:
+                        mergeable += 1
+                    else:
+                        clutter += 1
+        adjacent = max(1, mergeable + clutter)
+
+        ordered = 0
+        for index in range(size):
+            row = [cells[index * size + c] for c in range(size)]
+            col = [cells[r * size + index] for r in range(size)]
+            for line in (row, col):
+                kept = [value for value in line if value]
+                if len(kept) < 2 or kept == sorted(kept) or kept == sorted(kept, reverse=True):
+                    ordered += 1
+
+        corners = (0, size - 1, size * (size - 1), size * size - 1)
+        cornered = 1.0 if largest and any(cells[i] == largest for i in corners) else 0.0
+
+        return {
+            "bias": 1.0,
+            "progress": (largest.bit_length() - 1) / 11.0 if largest else 0.0,
+            "my_strength": empty / (size * size),
+            "their_strength": clutter / adjacent,
+            "win_available": 1.0 if largest >= self.target else 0.0,
+            "must_block": 1.0 if empty <= 2 else 0.0,
+            # The spatial part: a board whose values run in order can be
+            # collapsed, and a biggest tile parked in a corner stays out of
+            # the way of everything else.
+            "2048:ordered": ordered / (2.0 * size),
+            "2048:cornered": cornered,
+            "2048:mergeable": mergeable / adjacent,
+        }
+
     def render(self, state: Game2048State) -> str:
         lines = []
         for r in range(self.size):

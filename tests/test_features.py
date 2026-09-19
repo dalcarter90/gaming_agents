@@ -302,9 +302,19 @@ def test_narrower_ideas_are_namespaced(game_name, rng):
 def test_games_with_no_description_stay_out_of_each_others_way(rng):
     """Two games' lookup keys could read identically by coincidence; prefixing
     keeps them apart once one set of weights covers everything."""
-    for name in ("nim", "2048"):
+    for name in ("nim",):
         game = make_game(name)
         assert all(f.startswith(f"{name}:") for f in game.features(game.initial_state(rng)))
+
+
+def test_every_game_the_learner_is_measured_on_has_a_description(rng):
+    """Nim is left on a lookup key deliberately -- it has 266 positions and a
+    table handles it perfectly. Everything big enough to need describing is
+    described."""
+    for name in ("connect4", "connect4-mini", "tictactoe", "blackjack", "kuhn", "2048"):
+        game = make_game(name)
+        described = set(game.features(game.initial_state(rng)))
+        assert not any(f.startswith(f"{name}:is:") for f in described), f"{name} is still a lookup"
 
 
 def test_sharing_is_off_unless_asked_for(rng):
@@ -360,3 +370,80 @@ def test_sharing_survives_a_round_trip(tmp_path, rng):
     restored = load_agent(save_agent(agent, tmp_path / "shared.json"))
     assert restored.shared is True
     assert dict(restored.weights[agent.SHARED]) == dict(agent.weights[agent.SHARED])
+
+
+# -- 2048, where memorising cannot work at all ----------------------------
+
+def test_2048_speaks_the_universal_vocabulary(rng):
+    game = make_game("2048")
+    assert UNIVERSAL <= set(game.features(game.initial_state(rng)))
+
+
+def test_a_tidy_board_and_a_fragmented_one_read_differently():
+    """Same score, same biggest tile, opposite positions. If the description
+    cannot tell these apart it is describing nothing."""
+    from gaming_agents.games.twenty_forty_eight import Game2048State
+
+    game = make_game("2048")
+    tidy = Game2048State(cells=(1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 0, 0, 0, 0, 0, 0), score=9000)
+    fragmented = Game2048State(
+        cells=(2, 1024, 4, 256, 512, 8, 128, 16, 4, 64, 2, 32, 8, 4, 16, 2), score=9000
+    )
+    order, mess = game.features(tidy), game.features(fragmented)
+
+    assert order["progress"] == mess["progress"], "the two boards are equally far along"
+    assert order["2048:ordered"] > mess["2048:ordered"]
+    assert order["2048:cornered"] > mess["2048:cornered"]
+    assert order["my_strength"] > mess["my_strength"], "room to move is the difference"
+    assert mess["must_block"] == 1.0, "a full board is one spawn from stuck"
+
+
+def test_a_cornered_biggest_tile_is_noticed():
+    from gaming_agents.games.twenty_forty_eight import Game2048State
+
+    game = make_game("2048")
+    corner = Game2048State(cells=(64, 2, 0, 0) + (0,) * 12)
+    middle = Game2048State(cells=(0, 0, 0, 0, 0, 64, 2, 0) + (0,) * 8)
+    assert game.features(corner)["2048:cornered"] == 1.0
+    assert game.features(middle)["2048:cornered"] == 0.0
+
+
+def test_room_to_move_is_what_my_strength_means():
+    from gaming_agents.games.twenty_forty_eight import Game2048State
+
+    game = make_game("2048")
+    roomy = game.features(Game2048State(cells=(2, 4) + (0,) * 14))
+    cramped = game.features(Game2048State(cells=tuple(range(2, 34, 2))))
+    assert roomy["my_strength"] > cramped["my_strength"]
+    assert roomy["must_block"] < cramped["must_block"]
+
+
+def test_progress_tracks_the_biggest_tile():
+    from gaming_agents.games.twenty_forty_eight import Game2048State
+
+    game = make_game("2048")
+    early = game.features(Game2048State(cells=(2,) + (0,) * 15))
+    late = game.features(Game2048State(cells=(1024,) + (0,) * 15))
+    assert late["progress"] > early["progress"]
+    assert game.features(Game2048State(cells=(2048,) + (0,) * 15))["win_available"] == 1.0
+
+
+def test_the_description_beats_memorising_on_2048(rng):
+    """The claim this game exists to test: a board that never comes round
+    twice cannot be learned by looking it up, but can be learned by
+    description."""
+    from gaming_agents.core.game import Game as BaseGame
+    from gaming_agents.games.twenty_forty_eight import TwentyFortyEight
+
+    class Undescribed(TwentyFortyEight):
+        features = BaseGame.features
+
+    budget = 120
+    described = make_agent("linear", lookahead_samples=2, alpha=0.02, epsilon=0.15)
+    train(make_game("2048"), described, budget, random.Random(0), eval_episodes=2)
+
+    memorised = make_agent("linear", lookahead_samples=2, alpha=0.02, epsilon=0.15)
+    train(Undescribed(), memorised, budget, random.Random(0), eval_episodes=2)
+
+    judge = lambda a, g: evaluate(g, a, None, 15, random.Random(5)).mean_outcome  # noqa: E731
+    assert judge(described, make_game("2048")) > judge(memorised, Undescribed()) * 1.5
