@@ -495,6 +495,58 @@ lets one game own the weights at a time.
 
 The exception is 2048, which is unharmed. That turns out to be the clue.
 
+### An agent that is never reset
+
+Every condition above starts a fresh agent. That is itself a protection: a run
+that goes badly is discarded and the next one begins clean. So here is one
+agent with a continuous life — born once, saved to disk after every stage,
+reloaded for the next, carrying everything forward including the stage we
+already knew would damage it.
+
+| stage of its life | Tic-Tac-Toe | Connect 4 | Blackjack | Poker | 2048 |
+|---|---|---|---|---|---|
+| born, never played anything | 0.643 | 0.787 | −0.110 | 0.289 | 2,162 |
+| childhood: nim and noughts | 0.943 | 0.993 | −0.115 | 0.246 | 7,705 |
+| connect four | **0.957** | 0.993 | −0.111 | 0.303 | 7,648 |
+| blackjack | 0.800 | 0.983 | −0.116 | 0.187 | 5,197 |
+| poker | 0.597 | 0.987 | −0.116 | **0.312** | 5,920 |
+| 2048 | 0.947 | 0.987 | **−0.336** | 0.312 | 9,296 |
+| the churn (all five, rotated) | 0.563 | 0.783 | −0.302 | 0.187 | 8,876 |
+| back to blackjack | **0.443** | 0.983 | **−0.114** | 0.176 | 5,814 |
+| back to the board | **0.940** | 0.983 | −0.114 | 0.217 | **9,806** |
+| blackjack once more | 0.513 | **0.997** | −0.122 | 0.176 | 7,856 |
+| *(specialists, for reference)* | *0.938* | *0.997* | *−0.114* | *0.257* | *8,318* |
+
+Two things happen, and they are the same thing seen from either end.
+
+**Nothing is permanently lost.** Blackjack collapsed to −0.336, within a
+whisker of the −0.39 of playing at random, and one stage of going back to it
+restored −0.114 — full specialist level. Tic-Tac-Toe fell to 0.443 and came
+back to 0.940. There is no scar tissue; the damage is entirely recoverable.
+
+**Nothing is permanently kept either.** Every recovery is paid for. Going back
+to blackjack cost Tic-Tac-Toe 0.563 → 0.443. Restoring the board games cost
+2048 nothing that time but cost poker. Returning to blackjack once more knocked
+Tic-Tac-Toe down again to 0.513. The agent never accumulates; it reallocates.
+
+Read down the columns and you find something worth sitting with: at some point
+in its life it matched or beat the specialist at *every one of the five games*.
+It was simply never good at all of them at the same time. (With the caveat that
+blackjack's best figure is at birth — the linear agent never learns that game
+at all, so its "best" only means least damaged.)
+
+So the answer to "keep everything, never reset" is that you get an agent that
+oscillates rather than one that grows. And the reason is not that resetting was
+protecting it from failure. It is that ten shared weights have no room for five
+games. A person can hold chess and poker and driving at once because there is
+capacity for all three; this agent has to choose, every time, and whatever it
+learned last wins.
+
+That reframes what the resets were doing. They were not sparing the agent its
+mistakes — mistakes turn out to be entirely survivable. They were sparing it a
+competition for space it cannot win. The fix for that is not a gentler
+curriculum, it is more room.
+
 ### Why: the same word, opposite meanings
 
 The weight each game arrives at for the *same named concept*, trained
