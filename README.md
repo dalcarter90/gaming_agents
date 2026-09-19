@@ -577,6 +577,72 @@ the bottom — the linear agent never learns that game at all, so both condition
 sit on the lookahead floor. Where there was headroom, the varied childhood won;
 where there was none, it cost nothing.
 
+### A childhood of things that are not games
+
+Three tasks joined the project purely to be a childhood, in
+`games/lessons.py`. None of them is a game:
+
+- **Reckoning** — reach a target number from zero in eight awkward moves
+  (`+1`, `+4`, `×2`, `−3`). Arriving exactly takes planning, not counting.
+- **Inquiry** — find a hidden number by testing, on a budget of tests. An
+  experiment is worth what it rules out, which no game here teaches.
+- **Grammar** — build a string as long as possible without breaking a rule you
+  were never told. The rule is fixed, so it can be learned; nothing announces
+  it, so it is learned by being cut off.
+
+They are not mathematics, science or language, and calling them that would be
+a lie. They are the smallest tasks that demand those *shapes* of reasoning
+while still fitting an interface built for games. Each describes itself in the
+universal vocabulary, so whatever they teach lands in the same weights a game
+would use. All three are learnable — random play scores −0.97 at Reckoning
+against a trained 0.02 — which is the minimum bar for a childhood to mean
+anything.
+
+Same design as the multi-sport run: equal total episodes, so a schooled agent
+practises its game half as much.
+
+| main game | early specialist | multi-sport | schooled |
+|---|---|---|---|
+| Poker | 0.252 | 0.295 | **0.318** |
+| Connect Four | 0.994 | 0.994 | 0.992 |
+| 2048 | 8,325 | **9,364** | 7,674 |
+
+**It depends entirely on the game, and not on how "developmental" the childhood
+was.** For poker, the lessons beat both a specialised childhood *and* a
+childhood of other games — a quarter more than the specialist, on half the
+poker. For 2048 they are worse than simply playing more 2048. Connect Four is
+at its ceiling and says nothing either way.
+
+The split is not mysterious once stated. Kuhn poker is a short decision under
+uncertainty against a budget, which is exactly what Inquiry and Reckoning are;
+the shapes line up. 2048 is a long spatial problem about the structure of a
+board, and the lessons contain no spatial content whatsoever — they can only
+dilute it.
+
+Which is the same finding this project keeps arriving at from new directions:
+**transfer follows shared structure, not shared subject matter.** Broadening a
+childhood is not automatically development. It helps when the new thing is
+secretly the same shape as the old thing, and costs when it is not.
+
+### A task with no exit
+
+Writing the lessons turned up a bug worth recording, because of how it hid.
+`Inquiry` could reach a state it never left: narrow to a single candidate
+without guessing, spend the last test, and `is_terminal` was false forever
+while no move could change anything.
+
+The contract suite has a test for exactly this — every game must terminate
+under random play — and it passed, because five random episodes never landed
+in that corner. What caught it was a test of the new tasks hanging. The fix
+makes "out of tests" end the hand whichever way it went, and leaves `guess` as
+the only move once there is nothing left to rule out; the contract test now
+runs sixty episodes with a move cap that fails loudly rather than hanging.
+
+The first numbers measured on this went into the bin. Training against a task
+whose episodes ran to the ten-thousand-move safety cap is not training against
+that task, and poker's schooled figure moved from 0.279 to 0.318 once it was
+real.
+
 ### Why the branch is the whole difference
 
 Set the two experiments side by side and they look contradictory. Pooling five

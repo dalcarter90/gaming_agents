@@ -20,6 +20,7 @@ from .agents.tabular_q import TabularQAgent
 from .games.blackjack import Blackjack
 from .games.connect_four import ConnectFour, ConnectFourMini
 from .games.kuhn_poker import KuhnPoker
+from .games.lessons import Grammar, Inquiry, Reckoning
 from .games.nim import Nim
 from .games.tictactoe import TicTacToe
 from .games.twenty_forty_eight import TwentyFortyEight
@@ -32,6 +33,9 @@ GAMES: dict[str, Callable[[], Game]] = {
     "connect4": ConnectFour,
     "blackjack": Blackjack,
     "kuhn": KuhnPoker,
+    "reckoning": Reckoning,
+    "inquiry": Inquiry,
+    "grammar": Grammar,
     "2048": TwentyFortyEight,
 }
 
