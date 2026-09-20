@@ -136,6 +136,30 @@ class Game(ABC):
         """
         return {f"{self.name}:is:{self.key(state)!r}": 1.0}
 
+    def all_achievements(self) -> tuple[str, ...]:
+        """Every milestone this game can award, declared rather than discovered.
+
+        It has to be declared. Finding the list by watching play means the
+        hardest milestones are invisible until something reaches them, and a
+        score computed over only what was seen reads 100% for an agent that
+        never came close to the top of the ladder.
+        """
+        return ()
+
+    def achievements(self, state: State) -> frozenset[str]:
+        """Everything ``state`` has unlocked, by name.
+
+        A single win-or-lose number says almost nothing about *how far* a
+        losing episode got. An achievement tree says it directly: which
+        milestones were reached, in a game where later ones depend on earlier
+        ones. Games without a natural ladder return nothing and are scored the
+        ordinary way.
+
+        This is read from a state rather than accumulated by the game, so it
+        stays a pure question about a position.
+        """
+        return frozenset()
+
     def redeal(self, state: State, seat: int, rng: random.Random) -> State:
         """A state ``seat`` cannot tell apart from this one, with the rest resampled.
 

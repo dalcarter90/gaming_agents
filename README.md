@@ -577,6 +577,85 @@ the bottom — the linear agent never learns that game at all, so both condition
 sit on the lookahead floor. Where there was headroom, the varied childhood won;
 where there was none, it cost nothing.
 
+### How fast, not how good: samples-to-competence
+
+Every number above this point answers "what does it score after N episodes".
+That is the wrong question for a curriculum. A curriculum is supposed to buy
+*speed* — the same standard reached sooner — and only counting episodes-to-a-
+standard can show it. `training/competence.py` measures that, with a 95%
+interval across seeds, because a mean of three runs with no spread quoted is
+not evidence.
+
+Connect Four, episodes needed to beat a random opponent 99% of the time, five
+seeds:
+
+| | episodes to competence |
+|---|---|
+| from scratch | 270 [131, 409] |
+| after a childhood of other games | **0** [0, 0] |
+| after a childhood of the lessons | 340 [256, 424] |
+
+A childhood of games makes the game free — the bar is already cleared before a
+single game of Connect Four is played. A childhood of the lessons does nothing
+here: its interval overlaps the from-scratch one, so the honest reading is *no
+measurable difference*, not *worse*.
+
+2048 to a score of 4,000, three seeds:
+
+| | episodes to competence |
+|---|---|
+| from scratch | 25 [25, 25] |
+| after other games | **0** [0, 0] |
+| after the lessons | 8 [0, 44] |
+
+And here the new metric earns its place, because it disagrees with the old one.
+The lessons make 2048 *faster to start* — 8 episodes against 25 — while the
+final-score table two sections up has them finishing *lower* than plain
+specialisation, 7,674 against 8,325. Speed to a standard and eventual quality
+are different things, and a table of final scores cannot tell you which one a
+curriculum bought.
+
+### Scoring what it managed, not whether it won
+
+A win-or-lose number cannot tell a near miss from a rout, and every 2048
+episode ends the same way — with a jammed board. `Game.achievements` gives a
+game a ladder of milestones, and `training/achievements.py` scores them by
+geometric mean over per-achievement unlock rates rather than by averaging,
+following Hafner's Crafter benchmark. Rare achievements then move the score far
+more than further progress on ones already mastered, so there is no way to
+inflate it by repeating what is easy.
+
+That is not a theoretical concern. On 2048's ten-rung ladder, over forty
+episodes:
+
+| | geometric score | naive average |
+|---|---|---|
+| random play | **3.6** | 25.8 |
+| trained | **53.9** | 79.2 |
+
+The naive average flatters random play by a factor of seven, purely on tiers it
+always clears. The geometric score says the true thing: it never does anything
+hard. It is equally unsentimental about the trained agent, which the average
+would put at 79 —
+
+```
+tile_32 100%  tile_64 100%  tile_128 100%  tile_256 100%
+stayed_roomy_while_big 100%  lasted_300_moves 88%  tile_512 85%
+anchored_a_big_tile 85%  tile_1024 35%  tile_2048 0%
+```
+
+The ladder is also the diagnostic the score is not: it says the agent is
+reliable to 512, occasional at 1024, and has never once made 2048 — and that it
+does keep its big tile anchored, which its *weights* claimed it did not care
+about. Behaviour and weights disagreeing is worth knowing, and no single number
+would have surfaced it.
+
+One design note that cost a wrong answer first time round. The achievement list
+has to be **declared by the game**, not discovered by watching play: found by
+probing, the hard rungs were invisible until something reached them, and a
+trained agent scored a meaningless 100.0 over the four rungs random play had
+happened to find.
+
 ### A childhood of things that are not games
 
 Three tasks joined the project purely to be a childhood, in

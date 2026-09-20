@@ -147,6 +147,41 @@ class TwentyFortyEight(Game):
             "2048:mergeable": mergeable / adjacent,
         }
 
+    #: The tile ladder. Each rung needs the one below it, so these unlock in
+    #: dependency order without the game having to enforce anything.
+    TILE_LADDER = (32, 64, 128, 256, 512, 1024, 2048)
+
+    def all_achievements(self) -> tuple[str, ...]:
+        return tuple(f"tile_{rung}" for rung in self.TILE_LADDER) + (
+            "lasted_300_moves", "anchored_a_big_tile", "stayed_roomy_while_big",
+        )
+
+    def achievements(self, state: Game2048State) -> frozenset[str]:
+        """Milestones this board has reached.
+
+        Mostly the tile ladder, which is naturally ordered -- a 512 cannot
+        happen without a 256 first. The three that are not about tiles are
+        about *how* the board was played, and are the ones a score alone would
+        never show: staying alive a long time, keeping the biggest tile out of
+        the way, and reaching something substantial while still having room to
+        move.
+        """
+        earned = {f"tile_{rung}" for rung in self.TILE_LADDER if max(state.cells) >= rung}
+
+        if state.moves >= 300:
+            earned.add("lasted_300_moves")
+
+        largest = max(state.cells)
+        corners = (0, self.size - 1, self.size * (self.size - 1), self.size * self.size - 1)
+        if largest >= 256 and any(state.cells[i] == largest for i in corners):
+            earned.add("anchored_a_big_tile")
+
+        empty = sum(1 for value in state.cells if value == 0)
+        if largest >= 256 and empty >= self.size * self.size // 2:
+            earned.add("stayed_roomy_while_big")
+
+        return frozenset(earned)
+
     def render(self, state: Game2048State) -> str:
         lines = []
         for r in range(self.size):

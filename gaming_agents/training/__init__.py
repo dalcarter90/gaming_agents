@@ -1,3 +1,9 @@
+from .competence import (
+    CompetenceResult,
+    confidence_interval,
+    default_judge,
+    samples_to_competence,
+)
 from .curriculum import (
     CURRICULA,
     CurriculumResult,
@@ -14,6 +20,7 @@ from .trainer import TrainReport, tournament, train
 
 __all__ = [
     "CURRICULA",
+    "CompetenceResult",
     "CurriculumResult",
     "EvalReport",
     "ExploitReport",
@@ -22,12 +29,15 @@ __all__ = [
     "StageResult",
     "TrainReport",
     "best_response_value",
+    "confidence_interval",
+    "default_judge",
     "evaluate",
     "exploitability",
     "get_curriculum",
     "load_agent",
     "peek",
     "run_curriculum",
+    "samples_to_competence",
     "save_agent",
     "tournament",
     "train",
