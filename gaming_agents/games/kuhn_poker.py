@@ -115,6 +115,9 @@ class KuhnPoker(Game):
         winner = 0 if state.cards[0] > state.cards[1] else 1
         return (stake, -stake) if winner == 0 else (-stake, stake)
 
+    def action_space(self) -> tuple[str, ...]:
+        return (CHECK, BET, FOLD, CALL)
+
     def features(self, state: KuhnState) -> dict[str, float]:
         """The universal vocabulary, read onto a poker hand.
 

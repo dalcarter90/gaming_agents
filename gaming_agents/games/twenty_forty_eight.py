@@ -151,6 +151,14 @@ class TwentyFortyEight(Game):
     #: dependency order without the game having to enforce anything.
     TILE_LADDER = (32, 64, 128, 256, 512, 1024, 2048)
 
+    def action_space(self) -> tuple[str, ...]:
+        return DIRECTIONS
+
+    def encode(self, state: Game2048State) -> tuple[float, ...]:
+        """Each square as the exponent of its tile, so 2 and 2048 are a fixed
+        distance apart rather than a thousandfold one."""
+        return tuple((value.bit_length() - 1) / 11.0 if value else 0.0 for value in state.cells)
+
     def all_achievements(self) -> tuple[str, ...]:
         return tuple(f"tile_{rung}" for rung in self.TILE_LADDER) + (
             "lasted_300_moves", "anchored_a_big_tile", "stayed_roomy_while_big",

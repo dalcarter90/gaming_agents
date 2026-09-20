@@ -177,6 +177,22 @@ class Blackjack(Game):
             "blackjack:usable_ace": 1.0 if state.player_ace else 0.0,
         }
 
+    def action_space(self) -> tuple[str, ...]:
+        return (HIT, STICK)
+
+    def encode(self, state: BlackjackState) -> tuple[float, ...]:
+        """The hand as three numbers, with the upcard spread over its values.
+
+        The upcard is given one slot per rank rather than a single magnitude,
+        because its effect is not monotonic -- a dealer showing 6 is the
+        weakest of all, and 2 is not. A learner handed one number for it can
+        only ever say "higher is worse", which is the precise reason the linear
+        agent cannot play this game.
+        """
+        upcard = [0.0] * 10
+        upcard[state.dealer_upcard - 1] = 1.0
+        return (state.player_total / 21.0, 1.0 if state.player_ace else 0.0, *upcard)
+
     def optimal_move(self, state: BlackjackState) -> str:
         """The exactly correct play in ``state``, solved rather than learned.
 

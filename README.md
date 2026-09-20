@@ -62,6 +62,7 @@ Four curricula ship: `classic` (the two-player rungs), `solo` (Blackjack then
 |---|---|---|
 | `random` | no | The floor. Every number below is relative to this. |
 | `qlearner` | **yes** | Tabular Q-learning. One number per exact position — it memorises. |
+| `neural` | **yes** | A one-hidden-layer value network, in plain Python. Reads the raw position and works out its own concepts. |
 | `linear` | **yes** | Learns weights over a *description* of a position, so one game teaches it about every position that resembles it — and with `shared=True`, one *game* teaches it about the next one. |
 | `mcts` | no | Monte Carlo tree search (UCT). Needs no training, only the ability to simulate — so it scales where the table does not. |
 | `minimax` | no | Alpha-beta. Exhaustive on the small games, so it plays *perfectly* there. Refuses poker rather than cheat at it. |
@@ -577,6 +578,83 @@ the bottom — the linear agent never learns that game at all, so both condition
 sit on the lookahead floor. Where there was headroom, the varied childhood won;
 where there was none, it cost nothing.
 
+### A learner with no vocabulary
+
+Every agent before this was handed its words. The tabular agent got a slot per
+position, the linear agent got threats and centre control and progress — all
+written by a person. `agents/neural.py` reads `Game.encode`, which is the bare
+position and nothing else: twelve numbers for a Blackjack hand, eighty-four for
+a Connect Four board. Anything resembling a concept has to be worked out.
+
+Still pure Python. One hidden layer over a few dozen inputs is a few thousand
+multiply-adds, which is cheap beside the game simulation around it.
+
+The prediction going in was that capacity was the wall — that Blackjack was
+beyond the linear agent because its policy bends and a weighted sum cannot
+bend. **That was wrong, and the way it was wrong is the useful part.**
+
+A network reading the raw hand scored −0.089, barely better than the linear
+agent's −0.10 and nowhere near the table's −0.052. So the bend was not the
+problem. Measuring the thing actually being asked of it:
+
+```
+How noisy is one evaluation of "stick" on 16 against a dealer 10?
+    1 sample  : ±0.770
+    8 samples : ±0.283
+   32 samples : ±0.136
+  128 samples : ±0.073
+
+the true gap between hit and stick on close decisions is often ~0.05
+```
+
+Valuing "stick" means playing the dealer's whole hand out and seeing what
+happened. Eight samples of that carry five times more noise than the difference
+they are supposed to resolve. **The agent was not failing to represent the
+answer; it was failing to hear the question.** And the linear agent had been
+losing the same argument all along.
+
+The fix is architectural rather than a bigger network. `plan=False` scores every
+action directly from one network output each — no model, no sampling, which is
+what a lookup table does without anyone calling it planning:
+
+| Blackjack, reading the raw hand | |
+|---|---|
+| planning, 8 samples a move | −0.094 |
+| **scoring directly** | **−0.054** |
+| *tabular agent, for reference* | *−0.052* |
+| *perfect play* | *−0.047* |
+
+Tabular parity on a game where the linear agent was stuck at −0.10, from the
+raw hand, with no concepts supplied — and two and a half times faster, since it
+stopped simulating. It also wobbled back to −0.063 at half a million hands,
+which is the constant-step-size problem this project found in the tabular agent
+long ago, turning up again in a network.
+
+### Where a network is the wrong tool
+
+It is not a general upgrade. On Connect Four, reading the bare board:
+
+| games played | win rate vs random |
+|---|---|
+| 500 | 0.807 |
+| 2,000 | 0.863 |
+| 6,000 | 0.927 |
+| 15,000 | 0.938 |
+
+The linear agent, reading ten hand-written features, hits **0.99 in 500 games**.
+Thirty times the experience and it still finishes lower.
+
+Which is the sharpest statement of the trade the whole project has been
+circling. Where a person knows the right concepts, telling the agent is worth
+enormously more than making it work them out. Where the concepts a person wrote
+are *provably inadequate* — Blackjack's policy reverses direction twice across
+the dealer's upcard, and no weight on a single "dealer strength" number can say
+that — the network is the only thing that gets there.
+
+Learned features are not better. They are what you reach for when you cannot
+write the features yourself, and they cost roughly thirty times the data for the
+privilege.
+
 ### How fast, not how good: samples-to-competence
 
 Every number above this point answers "what does it score after N episodes".
@@ -948,11 +1026,15 @@ the one it came from.
 
 ## Where to take it next
 
-- **Learned features.** `Game.features` closed the gap on Connect Four and on
-  2048, but a person wrote those features every time, and the one game still
-  unaddressed — chess, or anything with a screen — would need a new set again.
-  A network that learns the description from the board itself is the only way
-  off that treadmill, and it is now the last hand-built piece left.
+- **A shared network across games.** The linear agent could pool one set of
+  weights over every game because they shared a vocabulary. The networks
+  cannot: their inputs are different widths, so each game gets its own. A
+  common encoding would put the transfer and interference questions back on the
+  table for learned representations, where they are far more interesting.
+- **A settling learning rate for the network.** Blackjack reached tabular
+  parity and then drifted back off it, which is the same constant-step-size
+  problem `alpha_mode="visits"` fixed for the table. The network has no
+  equivalent yet.
 - **Learning from search.** MCTS is already the strongest thing here. Train the
   learner on its move choices and you have the outline of AlphaZero.
 - **An LLM agent.** `Agent` needs one method, and every game renders to text

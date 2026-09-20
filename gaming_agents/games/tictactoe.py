@@ -121,6 +121,16 @@ class TicTacToe(Game):
             "tictactoe:corners_theirs": squeeze(sum(state.cells[i] == theirs for i in corners), 4),
         }
 
+    def action_space(self) -> tuple[int, ...]:
+        return tuple(range(9))
+
+    def encode(self, state: TicTacToeState) -> tuple[float, ...]:
+        """Nine cells as mine, nine as theirs, from the mover's point of view."""
+        mine, theirs = state.player + 1, 2 - state.player
+        return tuple(1.0 if cell == mine else 0.0 for cell in state.cells) + tuple(
+            1.0 if cell == theirs else 0.0 for cell in state.cells
+        )
+
     def render(self, state: TicTacToeState) -> str:
         rows = []
         for r in range(3):

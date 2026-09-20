@@ -12,6 +12,7 @@ from .agents.base import Agent
 from .agents.cfr import CFRAgent
 from .agents.human import HumanAgent
 from .agents.linear_q import LinearAgent
+from .agents.neural import NeuralAgent
 from .agents.mcts import MCTSAgent
 from .agents.minimax import MinimaxAgent
 from .agents.solvers import NashKuhnAgent, PerfectBlackjackAgent, PerfectNimAgent
@@ -44,6 +45,7 @@ AGENTS: dict[str, Callable[..., Agent]] = {
     "first": FirstMoveAgent,
     "qlearner": TabularQAgent,
     "linear": LinearAgent,
+    "neural": NeuralAgent,
     "cfr": CFRAgent,
     "mcts": MCTSAgent,
     "minimax": MinimaxAgent,

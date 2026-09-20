@@ -95,6 +95,18 @@ class ConnectFour(Game):
             return (0.0, 0.0)
         return (1.0, -1.0) if state.winner == 0 else (-1.0, 1.0)
 
+    def action_space(self) -> tuple[int, ...]:
+        return tuple(range(self.cols))
+
+    def encode(self, state: ConnectFourState) -> tuple[float, ...]:
+        """Every cell twice over, mine then theirs, from the mover's side."""
+        me = self.current_player(state)
+        mine, theirs = me + 1, 2 - me
+        board = self._flatten(state.columns)
+        return tuple(1.0 if cell == mine else 0.0 for cell in board) + tuple(
+            1.0 if cell == theirs else 0.0 for cell in board
+        )
+
     def features(self, state: ConnectFourState) -> dict[str, float]:
         """Describe the position the way a person would, not by its identity.
 

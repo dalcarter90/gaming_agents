@@ -136,6 +136,39 @@ class Game(ABC):
         """
         return {f"{self.name}:is:{self.key(state)!r}": 1.0}
 
+    def action_space(self) -> tuple[Move, ...]:
+        """Every move this game can ever offer, in a fixed order.
+
+        A learner that scores each action directly needs a slot per action that
+        means the same thing in every position -- which :meth:`legal_moves`
+        cannot give, since it returns only what is available right now. Games
+        that cannot enumerate their moves return nothing and can only be played
+        by looking ahead.
+        """
+        return ()
+
+    def encode(self, state: State) -> tuple[float, ...]:
+        """``state`` as a plain vector of numbers, for a learner with no words.
+
+        :meth:`features` hands a learner concepts a person chose. This hands it
+        the position and nothing else, so that anything resembling a concept
+        has to be worked out rather than supplied. A game that does not
+        override this falls back to its own features in a fixed order, which
+        makes the difference between the two measurable: the same network,
+        reading hand-written concepts or reading the raw position.
+
+        The vector must be the same length for every state of a game, and its
+        entries should sit in roughly [-1, 1].
+        """
+        described = self.features(state)
+        return tuple(described[name] for name in sorted(described))
+
+    def encoding_names(self) -> tuple[str, ...]:
+        """What each slot of :meth:`encode` means, for reading a model back."""
+        import random as _random
+
+        return tuple(sorted(self.features(self.initial_state(_random.Random(0)))))
+
     def all_achievements(self) -> tuple[str, ...]:
         """Every milestone this game can award, declared rather than discovered.
 
